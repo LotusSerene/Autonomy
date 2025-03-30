@@ -1,17 +1,34 @@
 import json
 import os
 import subprocess
-from typing import Dict, Any, Callable, List
+from typing import Dict, Any, Callable, List, Optional
 import datetime
 import inspect # Added for execute_tool logic
 import shlex # Added for safe command splitting in git_operation
 from pathlib import Path # Added for path validation
+import uuid # Added for potential ID generation if needed
 
 # --- Workspace Configuration (Example) ---
 # Define a base directory to restrict file operations for security
 WORKSPACE_DIR = Path(os.getenv("AGENT_WORKSPACE", Path.cwd() / "agent_workspace")).resolve()
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True) # Ensure workspace exists
 print(f"--- File operations restricted to: {WORKSPACE_DIR} ---")
+
+# --- LLM Utilities (Import for specific tools) ---
+try:
+    from llm_utils import generate_text, get_main_model, get_assistant_model
+    LLM_AVAILABLE = True
+    print("LLM utilities loaded successfully.")
+except ImportError:
+    print("Warning: llm_utils not found or failed to import. LLM-dependent tools will not be available.")
+    LLM_AVAILABLE = False
+    # Define dummy functions if LLM utils are not available
+    def generate_text(prompt: str, model=None) -> Optional[str]:
+        print(f"LLM UNAVAILABLE. Cannot process prompt: {prompt[:100]}...")
+        return None
+    def get_main_model(): return None
+    def get_assistant_model(): return None
+
 
 def _is_path_safe(path_to_check: Path) -> bool:
     """Checks if the path is within the defined WORKSPACE_DIR."""
@@ -166,6 +183,7 @@ def read_file(filepath: str) -> str:
     Reads the content of a file at the specified path within the agent's workspace.
     Input: Filepath string (relative to workspace or absolute within workspace).
     Returns the file content (up to 4000 chars) or an error message.
+    \n   [Security Risk: Medium - Operates within workspace/allowed domains]
     """
     print(f"--- Executing Read File Tool ---")
     print(f"Requested Filepath: {filepath}")
@@ -210,13 +228,13 @@ def read_file(filepath: str) -> str:
 def edit_file(instructions: str) -> str:
     """
     Edits an existing file within the agent's workspace based on JSON instructions.
-    HIGH RISK: Requires careful validation and potentially backups.
     Input: JSON string specifying 'filepath', 'action' ('replace', 'insert', 'append', 'delete_line'), and necessary parameters.
     Example: '{"filepath": "path/to/file.txt", "action": "replace", "old_text": "abc", "new_text": "xyz", "count": 1}' (optional count for replace)
     Example: '{"filepath": "path/to/file.py", "action": "insert", "line_number": 10, "text": "new code line"}' (1-based line number)
     Example: '{"filepath": "path/to/file.txt", "action": "append", "text": "new line at end"}'
     Example: '{"filepath": "path/to/file.txt", "action": "delete_line", "line_number": 5}' (1-based line number)
     Returns a success message or an error message.
+    \n   [Security Risk: High - Use with caution and specific instructions]
     """
     # IMPORTANT: VERY HIGH RISK. Needs strict validation, sandboxing, backups.
     print(f"--- Executing Edit File Tool ---")
@@ -382,6 +400,7 @@ try:
         Example: '{"url": "https://httpbin.org/get", "method": "GET", "params": {"id": 123}}'
         Example: '{"url": "https://httpbin.org/post", "method": "POST", "json_body": {"name": "John"}}'
         Returns the API response text/JSON (up to 4000 chars) or an error message.
+        \n   [Security Risk: Medium - Operates within workspace/allowed domains]
         """
         print(f"--- Executing API Call Tool ---")
         print(f"Request Details: {request_details}")
@@ -514,22 +533,27 @@ def datausa_api(query_params: str) -> str:
         return f"Error preparing Data USA API request: {e}"
 
 
-# ... create_subgoal (Stub - Needs Agent Integration) ...
 def create_subgoal(goal_description: str) -> str:
     """
-    Registers a new sub-goal for the agent to potentially address later.
+    Formats a request to register a new sub-goal for the agent.
     Input is a description string of the sub-goal.
-    (This requires integration with the agent's internal state or goal memory).
+    Returns a JSON string representing the request for the agent's goal management system.
+    Example output: '{"action": "add_goal", "description": "Research topic X"}'
     """
-    # TODO: Implement interaction with the agent's goal management system.
-    # This might involve adding the goal to a list, database, or vector store.
-    print(f"--- Executing Create Subgoal Tool (Stub) ---")
+    print(f"--- Executing Create Subgoal Tool ---")
     if not isinstance(goal_description, str) or not goal_description.strip():
         return "Error: Goal description must be a non-empty string."
     print(f"Sub-goal Description: {goal_description}")
-    # Example: Could potentially write to a goals file or call an internal agent method.
-    # agent_state.add_goal(goal_description) # Hypothetical
-    return f"Placeholder: Sub-goal '{goal_description}' registration requested. Requires agent state integration."
+
+    # Format the request as JSON for the agent graph to handle
+    request_payload = {
+        "action": "add_goal",
+        "description": goal_description.strip()
+    }
+    try:
+        return json.dumps(request_payload)
+    except Exception as e:
+        return f"Error formatting subgoal request: {e}"
 
 
 # ... request_human_input (Basic Implementation) ...
@@ -566,6 +590,7 @@ def create_file(filepath_and_content: str) -> str:
     Creates a new file with specified content within the agent's workspace.
     Input: JSON string format: '{"filepath": "path/new_file.txt", "content": "Initial content."}'
     Returns a success message or an error message.
+    \n   [Security Risk: High - Use with caution and specific instructions]
     """
     print(f"--- Executing Create File Tool ---")
     print(f"Filepath and Content: {filepath_and_content}")
@@ -621,6 +646,7 @@ def create_directory(dirpath: str) -> str:
     Creates a new directory at the specified path within the agent's workspace.
     Input: Directory path string (relative to workspace or absolute within workspace).
     Returns a success message or an error message.
+    \n   [Security Risk: Medium - Operates within workspace/allowed domains]
     """
     print(f"--- Executing Create Directory Tool ---")
     print(f"Requested Directory Path: {dirpath}")
@@ -654,7 +680,6 @@ def create_directory(dirpath: str) -> str:
 def git_operation(command_details: str) -> str:
     """
     Executes a limited set of safe Git commands in a specified repository directory within the workspace.
-    HIGH RISK: Command execution is inherently risky. Only allows specific safe commands.
     Input: JSON string format: '{"repo_path": "relative/path/to/repo", "command": "status"}'
            or '{"repo_path": "relative/path/to/repo", "command": "clone", "url": "https://..."}'
            or '{"repo_path": "relative/path/to/repo", "command": "pull"}'
@@ -664,6 +689,7 @@ def git_operation(command_details: str) -> str:
            or '{"repo_path": "relative/path/to/repo", "command": "checkout", "options": ["main"]}' # Be careful with checkout
     Allowed commands: status, clone, pull, diff, log, branch, checkout (use checkout with caution).
     Returns the command output (stdout/stderr, up to 4000 chars) or an error message.
+    \n   [Security Risk: High - Use with caution and specific instructions]
     """
     # IMPORTANT: VERY HIGH RISK. Needs strict validation and sandboxing.
     print(f"--- Executing Git Operation Tool ---")
@@ -824,55 +850,137 @@ def list_tools() -> str:
         return str(available)
 
 
-# ... prioritize_goals (Stub - Needs LLM/Agent Integration) ...
 def prioritize_goals(goal_list_and_context: str) -> str:
     """
-    Analyzes a list of goals and suggests a priority order based on context.
+    Analyzes a list of goals and suggests a priority order based on context, using an LLM.
     Input: JSON string format: '{"goals": ["goal A", "goal B"], "context": "Urgent deadline approaching"}'
-    (This likely requires an LLM call internally and integration with goal management).
+    Returns a JSON string with the prioritized list of goals or an error message.
     """
-    # TODO: Implement logic, potentially calling an LLM. Needs integration with goal management.
-    print(f"--- Executing Prioritize Goals Tool (Stub) ---")
+    print(f"--- Executing Prioritize Goals Tool ---")
     print(f"Input: {goal_list_and_context}")
+
+    if not LLM_AVAILABLE:
+        return "Error: LLM is not available, cannot prioritize goals."
+
     try:
         data = json.loads(goal_list_and_context)
-        if not isinstance(data.get("goals"), list) or not isinstance(data.get("context"), str):
-             return "Error: Invalid input format. Expected JSON with 'goals' (list) and 'context' (string)."
-        # Needs implementation: Parse input, construct prompt, call LLM, parse response.
-        return f"Placeholder: Goal prioritization based on context '{data['context']}' requested. Needs LLM/Agent integration."
+        goals = data.get("goals")
+        context = data.get("context")
+
+        if not isinstance(goals, list) or not goals:
+             return "Error: Invalid input format. Expected JSON with a non-empty 'goals' list."
+        if not isinstance(context, str):
+             return "Error: Invalid input format. Expected JSON with a 'context' string."
+
+        # Construct prompt for the LLM (using assistant model might be sufficient)
+        prompt = f"""
+        Given the following list of goals and the current context, please prioritize the goals.
+        Return the prioritized list as a JSON array of strings.
+
+        Goals:
+        {json.dumps(goals, indent=2)}
+
+        Context:
+        {context}
+
+        Prioritized Goals (JSON Array):
+        """
+
+        print("Attempting goal prioritization using Assistant LLM...")
+        llm = get_assistant_model()
+        if not llm:
+            return "Error: Could not load Assistant LLM model."
+
+        prioritized_goals_str = generate_text(prompt, llm)
+
+        if not prioritized_goals_str:
+            return "Error: LLM failed to generate prioritized goal list."
+
+        # Attempt to parse the LLM response as JSON
+        try:
+            # Clean potential markdown code blocks
+            if prioritized_goals_str.strip().startswith("```json"):
+                prioritized_goals_str = prioritized_goals_str.strip()[7:]
+                if prioritized_goals_str.endswith("```"):
+                    prioritized_goals_str = prioritized_goals_str[:-3]
+            elif prioritized_goals_str.strip().startswith("```"):
+                 prioritized_goals_str = prioritized_goals_str.strip()[3:]
+                 if prioritized_goals_str.endswith("```"):
+                     prioritized_goals_str = prioritized_goals_str[:-3]
+
+
+            prioritized_list = json.loads(prioritized_goals_str.strip())
+            if not isinstance(prioritized_list, list):
+                raise ValueError("LLM did not return a JSON list.")
+            # Optional: Validate that the returned goals are a permutation of the original ones
+            # (This might be too strict if the LLM slightly rephrases them)
+
+            print(f"Prioritized Goals: {prioritized_list}")
+            return json.dumps({"prioritized_goals": prioritized_list})
+
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"Error parsing LLM response for prioritized goals: {e}")
+            print(f"LLM Raw Output: {prioritized_goals_str}")
+            # Return the raw output if parsing fails, maybe it's still useful
+            return f"Warning: Could not parse LLM response as JSON list. Raw output: {prioritized_goals_str}"
+
     except json.JSONDecodeError:
         return f"Error: Invalid JSON format in input: {goal_list_and_context}"
     except Exception as e:
         return f"Error processing prioritize_goals request: {e}"
 
 
-# ... manage_goals (Stub - Needs Agent Integration) ...
 def manage_goals(action_details: str) -> str:
     """
-    Manages the agent's goals (add, remove, update status).
+    Formats a request to manage the agent's goals (add, remove, update status).
     Input: JSON string format: '{"action": "update", "goal_id": "goal_123", "status": "achieved"}'
            or '{"action": "add", "description": "New goal C"}'
            or '{"action": "remove", "goal_id": "goal_456"}'
-    (Requires integration with the agent's goal memory/state, e.g., Qdrant).
+    Returns a JSON string representing the request for the agent's goal management system.
     """
-    # TODO: Implement interaction with goal memory (e.g., Qdrant goal_memory collection).
-    print(f"--- Executing Manage Goals Tool (Stub) ---")
+    print(f"--- Executing Manage Goals Tool ---")
     print(f"Action Details: {action_details}")
     try:
         params = json.loads(action_details)
         action = params.get("action")
+
         if not action:
             return "Error: Missing 'action' in details."
-        # Basic validation based on action
-        if action == "add" and not params.get("description"):
-            return "Error: 'add' action requires 'description'."
-        if action in ["update", "remove"] and not params.get("goal_id"):
-            return f"Error: '{action}' action requires 'goal_id'."
-        if action == "update" and not params.get("status"):
-             return "Error: 'update' action requires 'status'."
 
-        # Needs implementation: Parse details, interact with goal storage system.
-        return f"Placeholder: Goal management action '{action_details}' requested. Needs Agent integration."
+        # Basic validation based on action
+        if action == "add":
+            if not params.get("description"):
+                return "Error: 'add' action requires 'description'."
+            # Ensure description is a string
+            if not isinstance(params.get("description"), str):
+                 return "Error: 'description' for 'add' action must be a string."
+        elif action == "update":
+            if not params.get("goal_id"):
+                return f"Error: '{action}' action requires 'goal_id'."
+            if not params.get("status"):
+                 return "Error: 'update' action requires 'status'."
+            # Ensure goal_id and status are strings
+            if not isinstance(params.get("goal_id"), str):
+                 return "Error: 'goal_id' for 'update' action must be a string."
+            if not isinstance(params.get("status"), str):
+                 return "Error: 'status' for 'update' action must be a string."
+        elif action == "remove":
+             if not params.get("goal_id"):
+                 return f"Error: '{action}' action requires 'goal_id'."
+             # Ensure goal_id is a string
+             if not isinstance(params.get("goal_id"), str):
+                 return "Error: 'goal_id' for 'remove' action must be a string."
+        else:
+            return f"Error: Unknown action '{action}'. Supported actions: add, update, remove."
+
+        # Format the request for the agent graph to handle
+        request_payload = {
+            "action": "manage_goal",
+            "details": params # Pass the validated parameters
+        }
+        print(f"Formatted goal management request: {request_payload}")
+        return json.dumps(request_payload)
+
     except json.JSONDecodeError:
         return f"Error: Invalid JSON format in action_details: {action_details}"
     except Exception as e:
@@ -906,28 +1014,27 @@ def request_tool_enhancement(request_description: str) -> str:
 
 def monitor_environment(trigger_conditions: str) -> str:
     """
-    Checks predefined triggers or monitors specific conditions. (STUB)
+    Checks predefined triggers or monitors specific conditions. (NOT IMPLEMENTED)
     Input: JSON string format example: '{"type": "file_change", "path": "path/to/watch/file.txt"}'
            or '{"type": "api_check", "url": "http://status.example.com", "expected_value": "OK"}'
-           or '{"type": "time_schedule", "cron": "0 9 * * MON"}' # Check if it's time
+           or '{"type": "time_schedule", "cron": "0 9 * * MON"}'
 
     Returns a description of triggered conditions or 'No triggers activated'.
-    (Requires complex implementation involving scheduling, file watching, API calls etc.)
+    NOTE: This tool is a placeholder. Full implementation requires complex background processes
+    (like file watching, scheduling, persistent API polling) which are beyond the scope
+    of a simple synchronous tool execution model. It currently returns a 'Not Implemented' message.
     """
-    # TODO: Implement logic to check various trigger types based on parsed 'trigger_conditions'.
-    # This is complex and likely needs a dedicated monitoring loop or integration with external services.
-    # Libraries like 'watchdog' (file system), 'schedule' or 'croniter' (time), 'requests' (API) could be used.
-    # Path validation (_is_path_safe) MUST be used for file-based triggers.
-    # Domain validation (_is_domain_allowed) MUST be used for API-based triggers.
-    print(f"--- Executing Monitor Environment Tool (Stub) ---")
-    print(f"Trigger Conditions to Check: {trigger_conditions}")
+    print(f"--- Executing Monitor Environment Tool (Placeholder) ---")
+    print(f"Trigger Conditions Received: {trigger_conditions}")
     try:
+        # Basic validation of input format
         conditions = json.loads(trigger_conditions)
-        # Basic validation
         if not isinstance(conditions, dict) or "type" not in conditions:
              return "Error: Invalid format for trigger_conditions. Expected JSON object with 'type'."
-        # Needs implementation to parse conditions and perform checks safely.
-        return f"Placeholder: Environment monitoring based on '{trigger_conditions}' requested. Needs complex implementation."
+
+        # Return placeholder message indicating it's not implemented
+        return "Tool Not Implemented: Environment monitoring requires complex background processes (scheduling, file watching, etc.) which are not supported by this synchronous tool."
+
     except json.JSONDecodeError:
         return f"Error: Invalid JSON format in trigger_conditions: {trigger_conditions}"
     except Exception as e:
@@ -936,37 +1043,102 @@ def monitor_environment(trigger_conditions: str) -> str:
 
 def generate_hypothesis(context: str) -> str:
     """
-    Analyzes the current situation and capabilities to propose potential new goals or opportunities for proactive action. (STUB)
+    Analyzes the current situation and capabilities to propose potential new goals or opportunities for proactive action, using an LLM.
     Input: A summary string of the current context (e.g., recent observations, available tools, idle status).
-    (This requires an LLM call internally).
+    Returns a string containing suggested hypotheses or opportunities, or an error message.
     """
-    # TODO: Implement using an LLM (e.g., main_llm).
-    # Prompt should guide the LLM based on agent's purpose, tools, and state.
-    print(f"--- Executing Generate Hypothesis Tool (Stub) ---")
-    if not isinstance(context, str):
-        return "Error: Context must be a string."
+    print(f"--- Executing Generate Hypothesis Tool ---")
+    if not LLM_AVAILABLE:
+        return "Error: LLM is not available, cannot generate hypothesis."
+    if not isinstance(context, str) or not context.strip():
+        return "Error: Context must be a non-empty string."
+
     print(f"Context for Hypothesis: {context[:200]}...") # Log truncated context
-    # Needs implementation: Construct prompt, call LLM, parse response.
-    # Example Prompt Idea: "Given my tools ({tool_list}), recent activity ({context}), and my goal to be proactively helpful, suggest one specific, actionable task I could undertake."
-    return f"Placeholder: Hypothesis/opportunity generation based on provided context requested. Needs LLM implementation."
+
+    # Get available tool names for the prompt context
+    tool_names = list(AVAILABLE_TOOLS.keys())
+
+    # Construct prompt for the LLM (using main model seems appropriate)
+    prompt = f"""
+    As an autonomous AI agent, analyze the provided context and suggest potential new goals or proactive tasks.
+    Consider your available tools and the overall aim of being helpful and efficient.
+
+    Current Context:
+    {context}
+
+    Available Tools:
+    {', '.join(tool_names)}
+
+    Instructions:
+    - Based on the context, generate 1-3 specific, actionable hypotheses or tasks the agent could undertake proactively.
+    - Frame them as potential goals or actions.
+    - Be creative but realistic given the tools.
+
+    Suggested Hypotheses/Opportunities:
+    - [Suggestion 1]
+    - [Suggestion 2]
+    ...
+    """
+
+    print("Generating hypotheses using Main LLM...")
+    llm = get_main_model()
+    if not llm:
+        return "Error: Could not load Main LLM model."
+
+    hypothesis_text = generate_text(prompt, llm)
+
+    if not hypothesis_text:
+        return "Error: LLM failed to generate hypotheses."
+
+    print(f"Generated Hypotheses: {hypothesis_text}")
+    return hypothesis_text.strip()
 
 
 def evaluate_self_performance(recent_activity_summary: str) -> str:
     """
-    Performs self-reflection on recent actions, focusing on autonomy, efficiency, and goal achievement. (STUB)
+    Performs self-reflection on recent actions using an LLM, focusing on autonomy, efficiency, and goal achievement.
     Input: A summary string of recent goals, actions, and outcomes.
-    (This requires an LLM call internally).
+    Returns a string containing the LLM's evaluation and key learnings, or an error message.
     """
-    # TODO: Implement using an LLM (e.g., main_llm).
-    # Prompt should ask specific questions about proactivity, efficiency, tool use, goal success, reliance on human input.
-    print(f"--- Executing Evaluate Self Performance Tool (Stub) ---")
-    if not isinstance(recent_activity_summary, str):
-        return "Error: Recent activity summary must be a string."
+    print(f"--- Executing Evaluate Self Performance Tool ---")
+    if not LLM_AVAILABLE:
+        return "Error: LLM is not available, cannot evaluate performance."
+    if not isinstance(recent_activity_summary, str) or not recent_activity_summary.strip():
+        return "Error: Recent activity summary must be a non-empty string."
+
     print(f"Summary for Self-Evaluation: {recent_activity_summary[:200]}...") # Log truncated summary
-    # Needs implementation: Construct prompt, call LLM, parse response.
-    # The result could be stored in semantic_memory or a dedicated reflection memory.
-    # Example Prompt Idea: "Evaluate the agent's performance based on the following activity: {recent_activity_summary}. Assess proactivity, efficiency, goal success, and reliance on human input. Provide key learnings."
-    return f"Placeholder: Self-performance evaluation based on provided summary requested. Needs LLM implementation."
+
+    # Construct prompt for the LLM (using main model seems appropriate)
+    prompt = f"""
+    Analyze the agent's performance based on the following summary of recent activity.
+    Focus on proactivity, efficiency, tool usage effectiveness, goal progress/achievement, and reliance on human input.
+    Provide constructive feedback and identify key learnings.
+
+    Recent Activity Summary:
+    {recent_activity_summary}
+
+    Evaluation:
+    [Detailed evaluation of performance aspects]
+
+    Key Learnings:
+    - [Learning 1]
+    - [Learning 2]
+    ...
+    """
+
+    print("Generating self-performance evaluation using Main LLM...")
+    llm = get_main_model()
+    if not llm:
+        return "Error: Could not load Main LLM model."
+
+    evaluation_text = generate_text(prompt, llm)
+
+    if not evaluation_text:
+        return "Error: LLM failed to generate self-performance evaluation."
+
+    print(f"Generated Evaluation: {evaluation_text}")
+    # The result could potentially be stored in semantic_memory by the agent graph later.
+    return evaluation_text.strip()
 
 
 # --- Tool Registry (Updated with potential missing libraries) ---
@@ -996,8 +1168,8 @@ else:
 
 # File Operations (Built-in, but depend on WORKSPACE_DIR logic)
 AVAILABLE_TOOLS["read_file"] = read_file
-AVAILABLE_TOOLS["edit_file"] = edit_file  # HIGH RISK
-AVAILABLE_TOOLS["create_file"] = create_file  # HIGH RISK
+AVAILABLE_TOOLS["edit_file"] = edit_file
+AVAILABLE_TOOLS["create_file"] = create_file
 AVAILABLE_TOOLS["create_directory"] = create_directory
 
 # API Calls
@@ -1011,20 +1183,28 @@ else:
 # Git Operations (Requires git executable)
 # We can't easily check for the executable here, so assume it might be available
 # The tool itself handles the FileNotFoundError if 'git' isn't callable.
-AVAILABLE_TOOLS["git_operation"] = git_operation # HIGH RISK
+AVAILABLE_TOOLS["git_operation"] = git_operation
 
-# Agent State / Human Interaction / Meta Tools (Built-in or Stubs)
-AVAILABLE_TOOLS["create_subgoal"] = create_subgoal # Stub - Needs Agent Integration
+# Agent State / Human Interaction / Meta Tools (Built-in or Implemented)
+AVAILABLE_TOOLS["create_subgoal"] = create_subgoal # Returns JSON request
 AVAILABLE_TOOLS["request_human_input"] = request_human_input # Built-in (basic console input)
 AVAILABLE_TOOLS["list_tools"] = list_tools # Built-in
-AVAILABLE_TOOLS["prioritize_goals"] = prioritize_goals # Stub - Needs LLM/Agent Integration
-AVAILABLE_TOOLS["manage_goals"] = manage_goals # Stub - Needs Agent Integration
 AVAILABLE_TOOLS["request_tool_enhancement"] = request_tool_enhancement # Built-in (logs to file)
 
-# New autonomy tools (Stubs):
-AVAILABLE_TOOLS["monitor_environment"] = monitor_environment # Stub - Needs complex implementation
-AVAILABLE_TOOLS["generate_hypothesis"] = generate_hypothesis # Stub - Needs LLM implementation
-AVAILABLE_TOOLS["evaluate_self_performance"] = evaluate_self_performance # Stub - Needs LLM implementation
+# LLM-dependent / Goal Management Tools
+if LLM_AVAILABLE:
+    AVAILABLE_TOOLS["prioritize_goals"] = prioritize_goals # Needs LLM
+    AVAILABLE_TOOLS["generate_hypothesis"] = generate_hypothesis # Needs LLM
+    AVAILABLE_TOOLS["evaluate_self_performance"] = evaluate_self_performance # Needs LLM
+else:
+    AVAILABLE_TOOLS["prioritize_goals"] = lambda *args, **kwargs: "Error: Prioritize goals tool requires LLM."
+    AVAILABLE_TOOLS["generate_hypothesis"] = lambda *args, **kwargs: "Error: Generate hypothesis tool requires LLM."
+    AVAILABLE_TOOLS["evaluate_self_performance"] = lambda *args, **kwargs: "Error: Evaluate performance tool requires LLM."
+
+AVAILABLE_TOOLS["manage_goals"] = manage_goals # Returns JSON request
+
+# Autonomy Tools (Stubs/Placeholders)
+AVAILABLE_TOOLS["monitor_environment"] = monitor_environment # Placeholder - Not Implemented
 
 
 # --- Tool Description and Execution Logic ---
@@ -1032,22 +1212,41 @@ AVAILABLE_TOOLS["evaluate_self_performance"] = evaluate_self_performance # Stub 
 def get_tool_description(tool_name: str) -> str:
     """Returns the docstring (description) of a tool."""
     tool_func = AVAILABLE_TOOLS.get(tool_name)
+    doc = ""
     if tool_func and tool_func.__doc__:
-        # Add input format hints from the docstring if available
         doc = tool_func.__doc__.strip()
-        # Add a note about risk level if applicable
-        if "_RISK" in tool_name.upper() or tool_name in ["edit_file", "create_file", "git_operation"]:
+
+        # Add a note about risk level if applicable (check name or docstring marker)
+        # Use specific names known to be high/medium risk
+        high_risk_tools = {"edit_file", "create_file", "git_operation"}
+        medium_risk_tools = {"api_call", "create_directory", "read_file"}
+        if tool_name in high_risk_tools:
              doc += "\n   [Security Risk: High - Use with caution and specific instructions]"
-        elif tool_name in ["api_call", "create_directory", "read_file"]:
+        elif tool_name in medium_risk_tools:
              doc += "\n   [Security Risk: Medium - Operates within workspace/allowed domains]"
 
-        # Add note about dependencies if the function is a placeholder
-        if "Error:" in tool_func("") if not inspect.signature(tool_func).parameters else tool_func("test"): # Basic check if it's a placeholder
-             if "requires" in tool_func(""):
-                  doc += f"\n   [Note: Requires external library/setup - {tool_func('')}]"
+        # Add note about dependencies if the function is a known placeholder or requires LLM
+        # Check if the function is one of the lambda placeholders or LLM-dependent ones
+        is_placeholder = False
+        try:
+            # Check if it's a lambda function returning an error message
+            if isinstance(tool_func, type(lambda: 0)) and "Error:" in tool_func("test_arg" if inspect.signature(tool_func).parameters else ""):
+                 is_placeholder = True
+                 placeholder_msg = tool_func("test_arg" if inspect.signature(tool_func).parameters else "")
+                 doc += f"\n   [Note: Tool unavailable - {placeholder_msg}]"
+        except: # Catch potential errors during the check
+            pass
 
-        return doc
-    return "No description available or tool not found."
+        # Explicitly mark LLM-dependent tools if LLM is unavailable
+        llm_tools = {"prioritize_goals", "generate_hypothesis", "evaluate_self_performance"}
+        if tool_name in llm_tools and not LLM_AVAILABLE and not is_placeholder:
+             doc += "\n   [Note: Tool unavailable - Requires LLM integration]"
+
+        # Mark monitor_environment as not implemented
+        if tool_name == "monitor_environment":
+             doc += "\n   [Note: Tool not fully implemented - Requires complex background processes]"
+
+    return doc if doc else "No description available or tool not found."
 
 
 def get_available_tools_list() -> Dict[str, str]:
@@ -1121,12 +1320,20 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                 is_required = False
                 if takes_arg:
                     first_param = params[0]
+                    # Check if the first parameter has no default value
                     is_required = first_param.default == inspect.Parameter.empty
 
                 # Validate argument presence/absence
                 if is_required and argument == "":
-                    error = f"Tool '{tool_name}' requires an argument, but none was provided inside the brackets []."
-                    print(error)
+                    # Check if the tool is one of the lambda placeholders which might not need args despite signature
+                    is_placeholder_lambda = isinstance(tool_function, type(lambda: 0)) and "Error:" in tool_function("")
+                    if not is_placeholder_lambda:
+                        error = f"Tool '{tool_name}' requires an argument, but none was provided inside the brackets []."
+                        print(error)
+                    else:
+                         # If it's a placeholder lambda, call it without args to get the error message
+                         result = tool_function()
+
                 elif not takes_arg and argument != "":
                     # Allow tools that take no args to be called with empty brackets TOOL[]
                     if argument: # Only warn if non-empty argument provided
@@ -1138,17 +1345,24 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                     # This assumes the LLM provides args correctly within the single string if needed,
                     # or the tool primarily uses the first arg.
                     # A more robust solution might involve the LLM specifying args by name in JSON.
-                    if num_params == 1 or (num_params > 1 and params[1].default != inspect.Parameter.empty):
+
+                    # Check if the function is a placeholder lambda expecting an arg
+                    is_placeholder_lambda_with_arg = isinstance(tool_function, type(lambda: 0)) and "Error:" in tool_function("test")
+
+                    if is_placeholder_lambda_with_arg:
+                        # Call the placeholder with a dummy arg to get the error message
+                        result = tool_function(argument if argument else "test")
+                    elif num_params == 1 or (num_params > 1 and all(p.default != inspect.Parameter.empty for p in params[1:])):
                         # If only one param, or subsequent params have defaults, pass the single arg string.
                         result = tool_function(argument)
-                    elif num_params == 2 and params[0].annotation is str and params[1].annotation is int:
-                         # Special case for (query: str, max_results: int = 3) pattern
-                         # Try to pass both if possible, otherwise just the query string
-                         # This is brittle; ideally the tool handles the single string arg robustly.
-                         # For now, just pass the main argument string. Let the tool handle it.
-                         result = tool_function(argument) # Tool needs to parse max_results from string if needed
+                    # Special case for web_search(query, max_results=3) - try to parse max_results if possible?
+                    # This gets complex quickly. Let's rely on the tool implementation to handle the single string arg for now.
+                    # Example: web_search could try to parse 'query, max_results=N' from the string if needed.
+                    # Current web_search only takes query, max_results is handled differently (not from arg string).
+                    # So, the single argument passing is generally correct for current tools.
                     else:
                          # Fallback for other multi-arg functions: pass the single string argument.
+                         # The tool needs to be designed to handle this.
                          result = tool_function(argument)
 
                 else: # Tool takes no arguments, and none was provided
@@ -1168,6 +1382,9 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                         except Exception as json_e:
                             print(f"Warning: Could not serialize tool result to JSON: {json_e}")
                             result = f"Error: Could not serialize tool result of type {type(result)}."
+                    # Check if the result itself indicates an error (common pattern)
+                    if isinstance(result, str) and result.lower().startswith("error:"):
+                         error = result # Promote tool-reported error to execution error
 
 
             else: # Tool name parsed but not found in registry
@@ -1186,7 +1403,7 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
     return {
         "tool_name": tool_name if tool_name else "N/A",
         "argument": argument,  # Store the raw argument string received
-        "result": result, # Store the result (should be string or None)
+        "result": result if error is None else None, # Store result only if no error occurred
         "error": error,   # Store error message (string or None)
     }
 
@@ -1196,6 +1413,7 @@ if __name__ == "__main__":
     print("--- Initializing Workspace and Tools ---")
     print(f"Workspace directory: {WORKSPACE_DIR}")
     print("\nAvailable Tools:")
+    # Use ensure_ascii=False for potentially better display of non-ASCII chars in descriptions
     print(json.dumps(get_available_tools_list(), indent=2, ensure_ascii=False))
 
     print("\n--- Testing Tool Execution ---")
@@ -1249,13 +1467,21 @@ if __name__ == "__main__":
         {"name": "Git Log", "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "log", "options": ["-n", "2", "--oneline"]}}]', "skip_if_no_libs": False}, # Depends on clone success
         {"name": "Git Checkout (Branch)", "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "checkout", "options": ["main"]}}]', "skip_if_no_libs": False}, # Depends on clone success
         # --- Agent/Human Interaction ---
-        {"name": "Create Subgoal (Stub)", "action": "create_subgoal[Plan the next phase of testing]", "skip_if_no_libs": False},
+        {"name": "Create Subgoal (Format Request)", "action": "create_subgoal[Plan the next phase of testing]", "skip_if_no_libs": False},
         # {"name": "Request Human Input", "action": "request_human_input[Please enter 'test input' below:]", "skip_if_no_libs": False}, # Uncomment to test interactively
         {"name": "Request Tool Enhancement", "action": "request_tool_enhancement[Need a tool to summarize PDF documents]", "skip_if_no_libs": False},
+        # --- Goal Management (Format Request) ---
+        {"name": "Manage Goals (Add Request)", "action": 'manage_goals[{"action": "add", "description": "Test goal to add"}]', "skip_if_no_libs": False},
+        {"name": "Manage Goals (Update Request)", "action": 'manage_goals[{"action": "update", "goal_id": "g123", "status": "in_progress"}]', "skip_if_no_libs": False},
+        {"name": "Manage Goals (Remove Request)", "action": 'manage_goals[{"action": "remove", "goal_id": "g456"}]', "skip_if_no_libs": False},
+        {"name": "Manage Goals (Invalid Action)", "action": 'manage_goals[{"action": "delete", "goal_id": "g789"}]', "skip_if_no_libs": False},
+        {"name": "Manage Goals (Missing Field)", "action": 'manage_goals[{"action": "add"}]', "skip_if_no_libs": False},
+        # --- LLM Dependent Tools ---
+        {"name": "Prioritize Goals", "action": 'prioritize_goals[{"goals": ["Task B", "Task A", "Task C"], "context": "Task A is most urgent"}]', "skip_if_no_libs": not LLM_AVAILABLE},
+        {"name": "Generate Hypothesis", "action": "generate_hypothesis[Agent is idle, last task completed successfully.]", "skip_if_no_libs": not LLM_AVAILABLE},
+        {"name": "Evaluate Performance", "action": "evaluate_self_performance[Completed goal 'research X', used web_search and read_file, took 3 steps.]", "skip_if_no_libs": not LLM_AVAILABLE},
         # --- Autonomy Stubs ---
-        {"name": "Monitor Environment (Stub)", "action": 'monitor_environment[{"type": "time_schedule", "cron": "0 0 * * *"}]', "skip_if_no_libs": False},
-        {"name": "Generate Hypothesis (Stub)", "action": "generate_hypothesis[Agent is idle, last task completed successfully.]", "skip_if_no_libs": False},
-        {"name": "Evaluate Performance (Stub)", "action": "evaluate_self_performance[Completed goal 'research X', used web_search and read_file, took 3 steps.]", "skip_if_no_libs": False},
+        {"name": "Monitor Environment (Placeholder)", "action": 'monitor_environment[{"type": "time_schedule", "cron": "0 0 * * *"}]', "skip_if_no_libs": False},
         # --- Error Handling ---
         {"name": "Non-existent Tool", "action": "non_existent_tool[some query]", "skip_if_no_libs": False},
         {"name": "Invalid Format (No Brackets)", "action": "read_file", "skip_if_no_libs": False},
@@ -1267,8 +1493,8 @@ if __name__ == "__main__":
         {"name": "Path Safety Violation (Git Clone Parent)", "action": 'git_operation[{"repo_path": "../unsafe_repo", "command": "clone", "url": "https://example.com/repo.git"}]', "skip_if_no_libs": False},
         {"name": "Edit File (Invalid JSON)", "action": 'edit_file[this is not json]', "skip_if_no_libs": False},
         {"name": "API Call (Invalid Domain)", "action": 'api_call[{"url": "https://malicious.example.net/data"}]', "skip_if_no_libs": 'requests' not in sys.modules},
-        {"name": "Git Operation (Disallowed Command)", "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "push"}}]', "skip_if_no_libs": False},
-        {"name": "Git Operation (Dangerous Option)", "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "log", "options": ["--exec=echo hacked"]}}]', "skip_if_no_libs": False},
+        {"name": "Git Operation (Disallowed Command)", "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "push"}}]', "skip_if_no_libs": False}, # Depends on clone success for path existence
+        {"name": "Git Operation (Dangerous Option)", "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "log", "options": ["--exec=echo hacked"]}}]', "skip_if_no_libs": False}, # Depends on clone success
         {"name": "Nested Tool Call (Hallucination)", "action": "read_file[web_search[find filename]]", "skip_if_no_libs": False},
     ]
 
@@ -1283,37 +1509,64 @@ if __name__ == "__main__":
         print(f"Action: {action}")
 
         if skip:
-            print("Skipping test due to missing library dependencies.")
-            results_summary[name] = "SKIPPED"
+            print("Skipping test due to missing library dependencies or LLM unavailability.")
+            results_summary[name] = "SKIPPED (Dependency)"
             continue
 
-        # Special handling for git status/log which depend on clone success
-        if name in ["Git Status", "Git Log", "Git Checkout (Branch)"] and results_summary.get("Git Clone") != "PASSED":
+        # Special handling for git commands depending on clone success
+        git_depends_on_clone = name in ["Git Status", "Git Log", "Git Checkout (Branch)", "Git Operation (Disallowed Command)", "Git Operation (Dangerous Option)"]
+        if git_depends_on_clone and results_summary.get("Git Clone") != "PASSED":
              print("Skipping test because prerequisite 'Git Clone' did not pass or was skipped.")
              results_summary[name] = "SKIPPED (Prereq Failed)"
              continue
+        # Special handling for file commands depending on create success
+        file_depends_on_create = name in ["Read File", "Edit File (Append)", "Read File (After Append)", "Edit File (Replace)", "Read File (After Replace)", "Edit File (Insert)", "Read File (After Insert)", "Edit File (Delete Line)", "Read File (After Delete)"]
+        if file_depends_on_create and results_summary.get("Create File") != "PASSED":
+             print("Skipping test because prerequisite 'Create File' did not pass or was skipped.")
+             results_summary[name] = "SKIPPED (Prereq Failed)"
+             continue
+
 
         output = execute_tool(action)
-        print(f"Output:\n{output}")
+        print(f"Output:\n{json.dumps(output, indent=2)}") # Pretty print output dict
 
-        # Basic pass/fail check (can be made more sophisticated)
+        # Basic pass/fail check
         passed = output.get("error") is None
+
         # Specific checks for errors we expect
-        if name.startswith("Path Safety") or name.startswith("Non-existent") or name.startswith("Invalid Format") or \
-           name.startswith("Tool Requiring Arg (Missing)") or name.startswith("API Call (Invalid Domain)") or \
-           name.startswith("Git Operation (Disallowed") or name.startswith("Git Operation (Dangerous") or \
-           name.startswith("Nested Tool Call"):
+        expected_error_tests = [
+            "Path Safety", "Non-existent Tool", "Invalid Format",
+            "Tool Requiring Arg (Missing)", "API Call (Invalid Domain)",
+            "Git Operation (Disallowed", "Git Operation (Dangerous",
+            "Nested Tool Call", "Edit File (Invalid JSON)",
+            "Manage Goals (Invalid Action)", "Manage Goals (Missing Field)"
+        ]
+        if any(name.startswith(prefix) for prefix in expected_error_tests):
             passed = output.get("error") is not None # Expect an error for these
-        elif name == "Tool Not Requiring Arg (Provided)":
-             passed = output.get("error") is None # Expect no error, just a warning maybe
+
+        # Specific checks for success we expect
+        expected_success_tests = [
+            "Tool Not Requiring Arg (Provided)", # Expect no error, just maybe warning
+            "Create Subgoal", "Manage Goals (Add Request)",
+            "Manage Goals (Update Request)", "Manage Goals (Remove Request)",
+            "Monitor Environment (Placeholder)" # Expect specific "Not Implemented" message, not error
+        ]
+        if any(name.startswith(prefix) for prefix in expected_success_tests):
+             passed = output.get("error") is None
+             # For monitor, check the result message specifically
+             if name == "Monitor Environment (Placeholder)":
+                 passed = passed and output.get("result") and "Tool Not Implemented" in output.get("result")
+
 
         results_summary[name] = "PASSED" if passed else "FAILED"
         print(f"Result: {results_summary[name]}")
 
 
     print("\n\n--- Test Summary ---")
-    for name, result in results_summary.items():
-        print(f"{name:<40}: {result}")
+    # Sort summary alphabetically for consistency
+    for name in sorted(results_summary.keys()):
+        result = results_summary[name]
+        print(f"{name:<50}: {result}")
 
     # Optional: Final cleanup
     # print("\n--- Cleaning up test artifacts ---")
@@ -1327,3 +1580,4 @@ if __name__ == "__main__":
     # if enhancement_log.exists():
     #      enhancement_log.unlink()
     #      print(f"Removed: {enhancement_log}")
+
