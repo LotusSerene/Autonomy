@@ -17,12 +17,10 @@ genai.configure(api_key=GOOGLE_API_KEY)
 
 # --- Model Configuration ---
 # Choose appropriate models:
-# Main model: For complex reasoning, planning, reflection (e.g., Gemini 1.5 Pro)
-# Assistant model: For faster, simpler tasks like query generation, initial refinement (e.g., Gemini 1.5 Flash)
-MAIN_MODEL_NAME = "gemini-1.5-pro-latest"
-ASSISTANT_MODEL_NAME = (
-    "gemini-1.5-flash-latest"  # Use Flash for potentially faster/cheaper tasks
-)
+# Main model: For complex reasoning, planning, reflection
+# Assistant model: For faster, simpler tasks like query generation, initial refinement
+MAIN_MODEL_NAME = "gemini-2.0-flash-thinking-exp-01-21"
+ASSISTANT_MODEL_NAME = "gemini-2.0-flash"
 EMBEDDING_MODEL_NAME = "text-embedding-004"
 
 # --- Client Initialization ---
