@@ -588,21 +588,32 @@ if __name__ == "__main__":
     for event in app.stream(
         inputs, {"recursion_limit": 15}
     ):  # Increase recursion limit slightly
+        # The 'event' yielded by stream might not always have the structure {node_name: state_dict}
+        # Sometimes, other event types might be yielded, or a node might finish without returning a standard state update.
+        # It's safer to check if 'value' is actually a dictionary before trying to access keys.
+        print(
+            f"\nRaw Event: {event}"
+        )  # Add this line to see what kind of events are yielded
         for key, value in event.items():
-            print(f"\n--- Node: {key} ---")
-            # Print specific state keys for clarity
-            print(f" Active Goal: {value.get('active_goal')}")
-            print(f" Plan: {value.get('current_plan')}")
-            print(f" Executed Actions: {len(value.get('executed_actions', []))}")
-            if value.get("executed_actions"):
-                print(f" Last Action: {value['executed_actions'][-1]['action']}")
-                print(
-                    f" Last Result: {str(value['executed_actions'][-1]['result'])[:200]}..."
-                )  # Truncate long results
-                print(f" Last Error: {value['executed_actions'][-1]['error']}")
-            if value.get("reflection_insights"):
-                print(f" Last Insight: {value['reflection_insights'][-1][:200]}...")
-            print(f" Graph Error: {value.get('error_message')}")
+            print(f"--- Node/Key: {key} ---")
+            # Check if 'value' is a dictionary before trying to access its items
+            if isinstance(value, dict):
+                # Print specific state keys for clarity
+                print(f" Active Goal: {value.get('active_goal')}")
+                print(f" Plan: {value.get('current_plan')}")
+                print(f" Executed Actions: {len(value.get('executed_actions', []))}")
+                if value.get("executed_actions"):
+                    print(f" Last Action: {value['executed_actions'][-1]['action']}")
+                    print(
+                        f" Last Result: {str(value['executed_actions'][-1]['result'])[:200]}..."
+                    )  # Truncate long results
+                    print(f" Last Error: {value['executed_actions'][-1]['error']}")
+                if value.get("reflection_insights"):
+                    print(f" Last Insight: {value['reflection_insights'][-1][:200]}...")
+                print(f" Graph Error: {value.get('error_message')}")
+            else:
+                # Handle cases where 'value' is not a dictionary (e.g., None or other data)
+                print(f" Value is not a dictionary: {value}")
             print("-" * 20)
 
     # Or use invoke for final state
