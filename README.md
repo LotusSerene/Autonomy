@@ -1,10 +1,14 @@
 # Autonomous Intent Framework (Concept Project)
 
+> [!IMPORTANT]
+> This is a conceptual project, meaning it doesn't really have a defined development path, this was just a spur of the moment idea, but hopefully it will be refined.
+
+> [!NOTE]
+> **Important Clarification:** This framework aims to _mimic_ aspects of intent and proactive behavior within the current limitations of AI. It does **not** aim to create consciousness, sentience, or true self-awareness, which are far beyond the scope of this project and current AI capabilities. The term "intent" is used conceptually to describe the agent's ability to formulate and pursue goals based on its internal state and external triggers.
+
 ## Introduction
 
 This project explores a conceptual framework for building AI agents with a degree of "autonomous intent." The core idea is to create systems capable of proactively pursuing high-level goals, adapting their plans based on memory, environmental context, and self-reflection. This framework integrates concepts similar to Chain-of-Thought (CoT) reasoning through its planning and reflection cycles.
-
-**Important Clarification:** This framework aims to _mimic_ aspects of intent and proactive behavior within the current limitations of AI. It does **not** aim to create consciousness, sentience, or true self-awareness, which are far beyond the scope of this project and current AI capabilities. The term "intent" is used conceptually to describe the agent's ability to formulate and pursue goals based on its internal state and external triggers.
 
 ## Core Concept: Autonomous Intent + CoT
 
