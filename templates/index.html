@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Autonomous Agent UI</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+    <!-- Include Socket.IO client library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Include Cytoscape.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <!-- Include the Dagre layout library itself -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+    <!-- Include Cytoscape.js layout extension (Dagre) -->
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <!-- Include your main JavaScript file -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Autonomous Agent Dashboard</h1>
+    </header>
+    <main>
+      <section id="controls">
+        <h2>Controls</h2>
+        <input
+          type="text"
+          id="goal-input"
+          placeholder="Enter initial goal here..."
+          style="width: 60%; padding: 8px; margin-right: 5px"
+        />
+        <button id="start-agent-btn">Start Agent</button>
+        <button id="stop-agent-btn" disabled>Stop Agent</button>
+      </section>
+      <section id="status-display">
+        <h2>Agent Status Log</h2>
+        <div id="agent-status-content">Initializing...</div>
+      </section>
+      <section id="brain-visualization">
+        <h2>Brain Visualization</h2>
+        <div
+          id="brain-container"
+          style="
+            height: 500px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+          "
+        >
+          <!-- Cytoscape will render here -->
+        </div>
+      </section>
+    </main>
+    <footer>
+      <p>Agent UI - &copy; 2024</p>
+    </footer>
+  </body>
+</html>

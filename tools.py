@@ -1,6 +1,9 @@
 import json
 import os
 import subprocess
+
+print("****** EXECUTING TOP LEVEL of tools.py ******")
+
 from typing import Dict, Any, Callable, List, Optional
 import datetime
 import inspect  # Added for execute_tool logic
@@ -1298,51 +1301,51 @@ AVAILABLE_TOOLS["monitor_environment"] = (
 
 
 def get_tool_description(tool_name: str) -> str:
-    """Returns the docstring (description) of a tool."""
+    """Returns the docstring (description) of a tool. Avoids executing the tool."""
     tool_func = AVAILABLE_TOOLS.get(tool_name)
     doc = ""
+    is_lambda_placeholder = False
+
+    # 1. Check if it's a lambda function (potential placeholder)
+    if isinstance(tool_func, type(lambda: 0)):
+        is_lambda_placeholder = True
+
+    # 2. Try to get the docstring
     if tool_func and tool_func.__doc__:
         doc = tool_func.__doc__.strip()
+    elif is_lambda_placeholder:
+        # If it's a lambda and has no docstring, assume it's an error placeholder
+        # We cannot safely get the specific error message without execution.
+        doc = "Tool unavailable (placeholder detected)."
+        # We mark it as unavailable later based on is_lambda_placeholder
+    else:
+        doc = "No description available."
 
-        # Add a note about risk level if applicable (check name or docstring marker)
-        # Use specific names known to be high/medium risk
-        high_risk_tools = {"edit_file", "create_file", "git_operation"}
-        medium_risk_tools = {"api_call", "create_directory", "read_file"}
-        if tool_name in high_risk_tools:
-            doc += "\n   [Security Risk: High - Use with caution and specific instructions]"
-        elif tool_name in medium_risk_tools:
-            doc += "\n   [Security Risk: Medium - Operates within workspace/allowed domains]"
+    # 3. Add security risk notes
+    high_risk_tools = {"edit_file", "create_file", "git_operation"}
+    medium_risk_tools = {"api_call", "create_directory", "read_file"}
+    if tool_name in high_risk_tools:
+        doc += "\n   [Security Risk: High - Use with caution and specific instructions]"
+    elif tool_name in medium_risk_tools:
+        doc += (
+            "\n   [Security Risk: Medium - Operates within workspace/allowed domains]"
+        )
 
-        # Add note about dependencies if the function is a known placeholder or requires LLM
-        # Check if the function is one of the lambda placeholders or LLM-dependent ones
-        is_placeholder = False
-        try:
-            # Check if it's a lambda function returning an error message
-            if isinstance(tool_func, type(lambda: 0)) and "Error:" in tool_func(
-                "test_arg" if inspect.signature(tool_func).parameters else ""
-            ):
-                is_placeholder = True
-                placeholder_msg = tool_func(
-                    "test_arg" if inspect.signature(tool_func).parameters else ""
-                )
-                doc += f"\n   [Note: Tool unavailable - {placeholder_msg}]"
-        except:  # Catch potential errors during the check
-            pass
+    # 4. Add dependency/availability notes
+    if is_lambda_placeholder:  # <-- CORRECTED variable name here
+        # Add a generic unavailable note if it was a lambda placeholder
+        doc += "\n   [Note: Tool unavailable - Check dependencies]"
+    elif (
+        tool_name
+        in {"prioritize_goals", "generate_hypothesis", "evaluate_self_performance"}
+        and not LLM_AVAILABLE
+    ):
+        doc += "\n   [Note: Tool unavailable - Requires LLM integration]"
+    elif tool_name == "monitor_environment":
+        doc += "\n   [Note: Tool not fully implemented - Requires complex background processes]"
 
-        # Explicitly mark LLM-dependent tools if LLM is unavailable
-        llm_tools = {
-            "prioritize_goals",
-            "generate_hypothesis",
-            "evaluate_self_performance",
-        }
-        if tool_name in llm_tools and not LLM_AVAILABLE and not is_placeholder:
-            doc += "\n   [Note: Tool unavailable - Requires LLM integration]"
-
-        # Mark monitor_environment as not implemented
-        if tool_name == "monitor_environment":
-            doc += "\n   [Note: Tool not fully implemented - Requires complex background processes]"
-
-    return doc if doc else "No description available or tool not found."
+    # Ensure we return something meaningful
+    return doc if doc else "Tool not found."
 
 
 def get_available_tools_list() -> Dict[str, str]:
@@ -1530,393 +1533,401 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
 
 
 # --- Example Usage (Updated) ---
-if __name__ == "__main__":
-    print("--- Initializing Workspace and Tools ---")
-    print(f"Workspace directory: {WORKSPACE_DIR}")
-    print("\nAvailable Tools:")
-    # Use ensure_ascii=False for potentially better display of non-ASCII chars in descriptions
-    print(json.dumps(get_available_tools_list(), indent=2, ensure_ascii=False))
+# if __name__ == "__main__":
+#     print("--- Initializing Workspace and Tools ---")
+#     print(f"Workspace directory: {WORKSPACE_DIR}")
+#     print("\nAvailable Tools:")
+#     # Use ensure_ascii=False for potentially better display of non-ASCII chars in descriptions
+#     print(json.dumps(get_available_tools_list(), indent=2, ensure_ascii=False))
+#
+#     print("\n--- Testing Tool Execution ---")
+#
+#     # Ensure workspace exists for tests
+#     WORKSPACE_DIR.mkdir(exist_ok=True)
+#     test_dir_path = WORKSPACE_DIR / "test_dir_tools"
+#     test_repo_path_str = "test_repo_tools"  # Relative path string
+#     test_repo_path = WORKSPACE_DIR / test_repo_path_str  # Path object
+#
+#     # Clean up previous test runs first
+#     import shutil
+#
+#     if test_dir_path.exists():
+#         print(f"Cleaning up previous test directory: {test_dir_path}")
+#         shutil.rmtree(test_dir_path)
+#     if test_repo_path.exists():
+#         print(f"Cleaning up previous test repository: {test_repo_path}")
+#         shutil.rmtree(test_repo_path)
+#
+#     # --- Test Cases ---
+#     test_cases = [
+#         # --- Basic Functionality ---
+#         {"name": "List Tools", "action": "list_tools", "skip_if_no_libs": False},
+#         {
+#             "name": "List Tools (with brackets)",
+#             "action": "list_tools[]",
+#             "skip_if_no_libs": False,
+#         },
+#         # --- Web Search ---
+#         {
+#             "name": "Web Search (DDG)",
+#             "action": "web_search[latest news about large language models]",
+#             "skip_if_no_libs": "duckduckgo_search" not in sys.modules,
+#         },
+#         # --- ArXiv Search ---
+#         {
+#             "name": "ArXiv Search",
+#             "action": "arxiv_search[explainable AI techniques]",
+#             "skip_if_no_libs": "arxiv" not in sys.modules,
+#         },
+#         # --- Wikipedia Search ---
+#         {
+#             "name": "Wikipedia Search",
+#             "action": "wikipedia_search[Alan Turing]",
+#             "skip_if_no_libs": "wikipedia" not in sys.modules,
+#         },
+#         {
+#             "name": "Wikipedia Search (Ambiguous)",
+#             "action": "wikipedia_search[Python]",
+#             "skip_if_no_libs": "wikipedia" not in sys.modules,
+#         },
+#         # --- Filesystem Operations ---
+#         {
+#             "name": "Create Directory",
+#             "action": f"create_directory[{test_dir_path.name}]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Create File",
+#             "action": f'create_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "content": "Hello from test case!"}}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Read File",
+#             "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Edit File (Append)",
+#             "action": f'edit_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "action": "append", "text": "\\nSecond line added."}}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Read File (After Append)",
+#             "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Edit File (Replace)",
+#             "action": f'edit_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "action": "replace", "old_text": "Second line", "new_text": "Third line", "count": 1}}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Read File (After Replace)",
+#             "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Edit File (Insert)",
+#             "action": f'edit_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "action": "insert", "line_number": 1, "text": "Inserted first line.\\n"}}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Read File (After Insert)",
+#             "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Edit File (Delete Line)",
+#             "action": f'edit_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "action": "delete_line", "line_number": 2}}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Read File (After Delete)",
+#             "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
+#             "skip_if_no_libs": False,
+#         },
+#         # --- API Calls ---
+#         {
+#             "name": "API Call (GET)",
+#             "action": 'api_call[{"url": "https://httpbin.org/get", "method": "GET", "params": {"test": "true"}}]',
+#             "skip_if_no_libs": "requests" not in sys.modules,
+#         },
+#         {
+#             "name": "API Call (POST)",
+#             "action": 'api_call[{"url": "https://httpbin.org/post", "method": "POST", "json_body": {"value": 42}}]',
+#             "skip_if_no_libs": "requests" not in sys.modules,
+#         },
+#         {
+#             "name": "DataUSA API",
+#             "action": 'datausa_api[{"measures": "Population", "geo": "nation/us"}]',
+#             "skip_if_no_libs": "requests" not in sys.modules,
+#         },
+#         # --- Git Operations (Requires git executable in PATH) ---
+#         {
+#             "name": "Git Clone",
+#             "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "clone", "url": "https://github.com/pallets/flask.git"}}]',
+#             "skip_if_no_libs": False,
+#         },  # Assumes git is installed
+#         {
+#             "name": "Git Status",
+#             "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "status"}}]',
+#             "skip_if_no_libs": False,
+#         },  # Depends on clone success
+#         {
+#             "name": "Git Log",
+#             "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "log", "options": ["-n", "2", "--oneline"]}}]',
+#             "skip_if_no_libs": False,
+#         },  # Depends on clone success
+#         {
+#             "name": "Git Checkout (Branch)",
+#             "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "checkout", "options": ["main"]}}]',
+#             "skip_if_no_libs": False,
+#         },  # Depends on clone success
+#         # --- Agent/Human Interaction ---
+#         {
+#             "name": "Create Subgoal (Format Request)",
+#             "action": "create_subgoal[Plan the next phase of testing]",
+#             "skip_if_no_libs": False,
+#         },
+#         # {"name": "Request Human Input", "action": "request_human_input[Please enter 'test input' below:]", "skip_if_no_libs": False}, # Uncomment to test interactively
+#         {
+#             "name": "Request Tool Enhancement",
+#             "action": "request_tool_enhancement[Need a tool to summarize PDF documents]",
+#             "skip_if_no_libs": False,
+#         },
+#         # --- Goal Management (Format Request) ---
+#         {
+#             "name": "Manage Goals (Add Request)",
+#             "action": 'manage_goals[{"action": "add", "description": "Test goal to add"}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Manage Goals (Update Request)",
+#             "action": 'manage_goals[{"action": "update", "goal_id": "g123", "status": "in_progress"}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Manage Goals (Remove Request)",
+#             "action": 'manage_goals[{"action": "remove", "goal_id": "g456"}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Manage Goals (Invalid Action)",
+#             "action": 'manage_goals[{"action": "delete", "goal_id": "g789"}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Manage Goals (Missing Field)",
+#             "action": 'manage_goals[{"action": "add"}]',
+#             "skip_if_no_libs": False,
+#         },
+#         # --- LLM Dependent Tools ---
+#         {
+#             "name": "Prioritize Goals",
+#             "action": 'prioritize_goals[{"goals": ["Task B", "Task A", "Task C"], "context": "Task A is most urgent"}]',
+#             "skip_if_no_libs": not LLM_AVAILABLE,
+#         },
+#         {
+#             "name": "Generate Hypothesis",
+#             "action": "generate_hypothesis[Agent is idle, last task completed successfully.]",
+#             "skip_if_no_libs": not LLM_AVAILABLE,
+#         },
+#         {
+#             "name": "Evaluate Performance",
+#             "action": "evaluate_self_performance[Completed goal 'research X', used web_search and read_file, took 3 steps.]",
+#             "skip_if_no_libs": not LLM_AVAILABLE,
+#         },
+#         # --- Autonomy Stubs ---
+#         {
+#             "name": "Monitor Environment (Placeholder)",
+#             "action": 'monitor_environment[{"type": "time_schedule", "cron": "0 0 * * *"}]',
+#             "skip_if_no_libs": False,
+#         },
+#         # --- Error Handling ---
+#         {
+#             "name": "Non-existent Tool",
+#             "action": "non_existent_tool[some query]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Invalid Format (No Brackets)",
+#             "action": "read_file",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Invalid Format (Bad Brackets)",
+#             "action": "read_file(test.txt)",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Tool Requiring Arg (Missing)",
+#             "action": "read_file[]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Tool Not Requiring Arg (Provided)",
+#             "action": "list_tools[some argument]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Path Safety Violation (Read)",
+#             "action": "read_file[../outside_file.txt]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Path Safety Violation (Create Dir)",
+#             "action": "create_directory[../../unsafe_dir]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Path Safety Violation (Git Clone Parent)",
+#             "action": 'git_operation[{{"repo_path": "../unsafe_repo", "command": "clone", "url": "https://example.com/repo.git"}}]',
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "Edit File (Invalid JSON)",
+#             "action": "edit_file[this is not json]",
+#             "skip_if_no_libs": False,
+#         },
+#         {
+#             "name": "API Call (Invalid Domain)",
+#             "action": 'api_call[{{"url": "https://malicious.example.net/data"}}]',
+#             "skip_if_no_libs": "requests" not in sys.modules,
+#         },
+#         {
+#             "name": "Git Operation (Disallowed Command)",
+#             "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "push"}}]',
+#             "skip_if_no_libs": False,
+#         },  # Depends on clone success for path existence
+#         {
+#             "name": "Git Operation (Dangerous Option)",
+#             "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "log", "options": ["--exec=echo hacked"]}}]',
+#             "skip_if_no_libs": False,
+#         },  # Depends on clone success
+#         {
+#             "name": "Nested Tool Call (Hallucination)",
+#             "action": "read_file[web_search[find filename]]",
+#             "skip_if_no_libs": False,
+#         },
+#     ]
+#
+#     results_summary = {}
+#
+#     for test in test_cases:
+#         name = test["name"]
+#         action = test["action"]
+#         skip = test["skip_if_no_libs"]
+#
+#         print(f"\n--- Running Test: {name} ---")
+#         print(f"Action: {action}")
+#
+#         if skip:
+#             print(
+#                 "Skipping test due to missing library dependencies or LLM unavailability."
+#             )
+#             results_summary[name] = "SKIPPED (Dependency)"
+#             continue
+#
+#         # Special handling for git commands depending on clone success
+#         git_depends_on_clone = name in [
+#             "Git Status",
+#             "Git Log",
+#             "Git Checkout (Branch)",
+#             "Git Operation (Disallowed Command)",
+#             "Git Operation (Dangerous Option)",
+#         ]
+#         if git_depends_on_clone and results_summary.get("Git Clone") != "PASSED":
+#             print(
+#                 "Skipping test because prerequisite 'Git Clone' did not pass or was skipped."
+#             )
+#             results_summary[name] = "SKIPPED (Prereq Failed)"
+#             continue
+#         # Special handling for file commands depending on create success
+#         file_depends_on_create = name in [
+#             "Read File",
+#             "Edit File (Append)",
+#             "Read File (After Append)",
+#             "Edit File (Replace)",
+#             "Read File (After Replace)",
+#             "Edit File (Insert)",
+#             "Read File (After Insert)",
+#             "Edit File (Delete Line)",
+#             "Read File (After Delete)",
+#         ]
+#         if file_depends_on_create and results_summary.get("Create File") != "PASSED":
+#             print(
+#                 "Skipping test because prerequisite 'Create File' did not pass or was skipped."
+#             )
+#             results_summary[name] = "SKIPPED (Prereq Failed)"
+#             continue
+#
+#         output = execute_tool(action)
+#         print(f"Output:\n{json.dumps(output, indent=2)}")  # Pretty print output dict
+#
+#         # Basic pass/fail check
+#         passed = output.get("error") is None
+#
+#         # Specific checks for errors we expect
+#         expected_error_tests = [
+#             "Path Safety",
+#             "Non-existent Tool",
+#             "Invalid Format",
+#             "Tool Requiring Arg (Missing)",
+#             "API Call (Invalid Domain)",
+#             "Git Operation (Disallowed",
+#             "Git Operation (Dangerous",
+#             "Nested Tool Call",
+#             "Edit File (Invalid JSON)",
+#             "Manage Goals (Invalid Action)",
+#             "Manage Goals (Missing Field)",
+#         ]
+#         if any(name.startswith(prefix) for prefix in expected_error_tests):
+#             passed = output.get("error") is not None  # Expect an error for these
+#
+#         # Specific checks for success we expect
+#         expected_success_tests = [
+#             "Tool Not Requiring Arg (Provided)",  # Expect no error, just maybe warning
+#             "Create Subgoal",
+#             "Manage Goals (Add Request)",
+#             "Manage Goals (Update Request)",
+#             "Manage Goals (Remove Request)",
+#             "Monitor Environment (Placeholder)",  # Expect specific "Not Implemented" message, not error
+#         ]
+#         if any(name.startswith(prefix) for prefix in expected_success_tests):
+#             passed = output.get("error") is None
+#             # For monitor, check the result message specifically
+#             if name == "Monitor Environment (Placeholder)":
+#                 passed = (
+#                     passed
+#                     and output.get("result")
+#                     and "Tool Not Implemented" in output.get("result")
+#                 )
+#
+#         results_summary[name] = "PASSED" if passed else "FAILED"
+#         print(f"Result: {results_summary[name]}")
+#
+#     print("\n\n--- Test Summary ---")
+#     # Sort summary alphabetically for consistency
+#     for name in sorted(results_summary.keys()):
+#         result = results_summary[name]
+#         print(f"{name:<50}: {result}")
+#
+#     # Final cleanup
+#     print("\n--- Cleaning up test artifacts ---")
+#     if test_dir_path.exists():
+#         shutil.rmtree(test_dir_path)
+#         print(f"Removed: {test_dir_path}")
+#     if test_repo_path.exists():
+#         shutil.rmtree(test_repo_path)
+#         print(f"Removed: {test_repo_path}")
+#     enhancement_log = WORKSPACE_DIR / "tool_enhancement_requests.log"
+#     if enhancement_log.exists():
+#         enhancement_log.unlink()
 
-    print("\n--- Testing Tool Execution ---")
+print(
+    "****** REACHED END of tools.py (before commented __main__ block) ******"
+)  # <-- ADDED HERE
 
-    # Ensure workspace exists for tests
-    WORKSPACE_DIR.mkdir(exist_ok=True)
-    test_dir_path = WORKSPACE_DIR / "test_dir_tools"
-    test_repo_path_str = "test_repo_tools"  # Relative path string
-    test_repo_path = WORKSPACE_DIR / test_repo_path_str  # Path object
-
-    # Clean up previous test runs first
-    import shutil
-
-    if test_dir_path.exists():
-        print(f"Cleaning up previous test directory: {test_dir_path}")
-        shutil.rmtree(test_dir_path)
-    if test_repo_path.exists():
-        print(f"Cleaning up previous test repository: {test_repo_path}")
-        shutil.rmtree(test_repo_path)
-
-    # --- Test Cases ---
-    test_cases = [
-        # --- Basic Functionality ---
-        {"name": "List Tools", "action": "list_tools", "skip_if_no_libs": False},
-        {
-            "name": "List Tools (with brackets)",
-            "action": "list_tools[]",
-            "skip_if_no_libs": False,
-        },
-        # --- Web Search ---
-        {
-            "name": "Web Search (DDG)",
-            "action": "web_search[latest news about large language models]",
-            "skip_if_no_libs": "duckduckgo_search" not in sys.modules,
-        },
-        # --- ArXiv Search ---
-        {
-            "name": "ArXiv Search",
-            "action": "arxiv_search[explainable AI techniques]",
-            "skip_if_no_libs": "arxiv" not in sys.modules,
-        },
-        # --- Wikipedia Search ---
-        {
-            "name": "Wikipedia Search",
-            "action": "wikipedia_search[Alan Turing]",
-            "skip_if_no_libs": "wikipedia" not in sys.modules,
-        },
-        {
-            "name": "Wikipedia Search (Ambiguous)",
-            "action": "wikipedia_search[Python]",
-            "skip_if_no_libs": "wikipedia" not in sys.modules,
-        },
-        # --- Filesystem Operations ---
-        {
-            "name": "Create Directory",
-            "action": f"create_directory[{test_dir_path.name}]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Create File",
-            "action": f'create_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "content": "Hello from test case!"}}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Read File",
-            "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Edit File (Append)",
-            "action": f'edit_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "action": "append", "text": "\\nSecond line added."}}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Read File (After Append)",
-            "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Edit File (Replace)",
-            "action": f'edit_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "action": "replace", "old_text": "Second line", "new_text": "Third line", "count": 1}}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Read File (After Replace)",
-            "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Edit File (Insert)",
-            "action": f'edit_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "action": "insert", "line_number": 1, "text": "Inserted first line.\\n"}}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Read File (After Insert)",
-            "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Edit File (Delete Line)",
-            "action": f'edit_file[{{"filepath": "{test_dir_path.name}/my_test_file.txt", "action": "delete_line", "line_number": 2}}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Read File (After Delete)",
-            "action": f"read_file[{test_dir_path.name}/my_test_file.txt]",
-            "skip_if_no_libs": False,
-        },
-        # --- API Calls ---
-        {
-            "name": "API Call (GET)",
-            "action": 'api_call[{"url": "https://httpbin.org/get", "method": "GET", "params": {"test": "true"}}]',
-            "skip_if_no_libs": "requests" not in sys.modules,
-        },
-        {
-            "name": "API Call (POST)",
-            "action": 'api_call[{"url": "https://httpbin.org/post", "method": "POST", "json_body": {"value": 42}}]',
-            "skip_if_no_libs": "requests" not in sys.modules,
-        },
-        {
-            "name": "DataUSA API",
-            "action": 'datausa_api[{"measures": "Population", "geo": "nation/us"}]',
-            "skip_if_no_libs": "requests" not in sys.modules,
-        },
-        # --- Git Operations (Requires git executable in PATH) ---
-        {
-            "name": "Git Clone",
-            "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "clone", "url": "https://github.com/pallets/flask.git"}}]',
-            "skip_if_no_libs": False,
-        },  # Assumes git is installed
-        {
-            "name": "Git Status",
-            "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "status"}}]',
-            "skip_if_no_libs": False,
-        },  # Depends on clone success
-        {
-            "name": "Git Log",
-            "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "log", "options": ["-n", "2", "--oneline"]}}]',
-            "skip_if_no_libs": False,
-        },  # Depends on clone success
-        {
-            "name": "Git Checkout (Branch)",
-            "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "checkout", "options": ["main"]}}]',
-            "skip_if_no_libs": False,
-        },  # Depends on clone success
-        # --- Agent/Human Interaction ---
-        {
-            "name": "Create Subgoal (Format Request)",
-            "action": "create_subgoal[Plan the next phase of testing]",
-            "skip_if_no_libs": False,
-        },
-        # {"name": "Request Human Input", "action": "request_human_input[Please enter 'test input' below:]", "skip_if_no_libs": False}, # Uncomment to test interactively
-        {
-            "name": "Request Tool Enhancement",
-            "action": "request_tool_enhancement[Need a tool to summarize PDF documents]",
-            "skip_if_no_libs": False,
-        },
-        # --- Goal Management (Format Request) ---
-        {
-            "name": "Manage Goals (Add Request)",
-            "action": 'manage_goals[{"action": "add", "description": "Test goal to add"}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Manage Goals (Update Request)",
-            "action": 'manage_goals[{"action": "update", "goal_id": "g123", "status": "in_progress"}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Manage Goals (Remove Request)",
-            "action": 'manage_goals[{"action": "remove", "goal_id": "g456"}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Manage Goals (Invalid Action)",
-            "action": 'manage_goals[{"action": "delete", "goal_id": "g789"}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Manage Goals (Missing Field)",
-            "action": 'manage_goals[{"action": "add"}]',
-            "skip_if_no_libs": False,
-        },
-        # --- LLM Dependent Tools ---
-        {
-            "name": "Prioritize Goals",
-            "action": 'prioritize_goals[{"goals": ["Task B", "Task A", "Task C"], "context": "Task A is most urgent"}]',
-            "skip_if_no_libs": not LLM_AVAILABLE,
-        },
-        {
-            "name": "Generate Hypothesis",
-            "action": "generate_hypothesis[Agent is idle, last task completed successfully.]",
-            "skip_if_no_libs": not LLM_AVAILABLE,
-        },
-        {
-            "name": "Evaluate Performance",
-            "action": "evaluate_self_performance[Completed goal 'research X', used web_search and read_file, took 3 steps.]",
-            "skip_if_no_libs": not LLM_AVAILABLE,
-        },
-        # --- Autonomy Stubs ---
-        {
-            "name": "Monitor Environment (Placeholder)",
-            "action": 'monitor_environment[{"type": "time_schedule", "cron": "0 0 * * *"}]',
-            "skip_if_no_libs": False,
-        },
-        # --- Error Handling ---
-        {
-            "name": "Non-existent Tool",
-            "action": "non_existent_tool[some query]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Invalid Format (No Brackets)",
-            "action": "read_file",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Invalid Format (Bad Brackets)",
-            "action": "read_file(test.txt)",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Tool Requiring Arg (Missing)",
-            "action": "read_file[]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Tool Not Requiring Arg (Provided)",
-            "action": "list_tools[some argument]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Path Safety Violation (Read)",
-            "action": "read_file[../outside_file.txt]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Path Safety Violation (Create Dir)",
-            "action": "create_directory[../../unsafe_dir]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Path Safety Violation (Git Clone Parent)",
-            "action": 'git_operation[{"repo_path": "../unsafe_repo", "command": "clone", "url": "https://example.com/repo.git"}]',
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "Edit File (Invalid JSON)",
-            "action": "edit_file[this is not json]",
-            "skip_if_no_libs": False,
-        },
-        {
-            "name": "API Call (Invalid Domain)",
-            "action": 'api_call[{"url": "https://malicious.example.net/data"}]',
-            "skip_if_no_libs": "requests" not in sys.modules,
-        },
-        {
-            "name": "Git Operation (Disallowed Command)",
-            "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "push"}}]',
-            "skip_if_no_libs": False,
-        },  # Depends on clone success for path existence
-        {
-            "name": "Git Operation (Dangerous Option)",
-            "action": f'git_operation[{{"repo_path": "{test_repo_path_str}", "command": "log", "options": ["--exec=echo hacked"]}}]',
-            "skip_if_no_libs": False,
-        },  # Depends on clone success
-        {
-            "name": "Nested Tool Call (Hallucination)",
-            "action": "read_file[web_search[find filename]]",
-            "skip_if_no_libs": False,
-        },
-    ]
-
-    results_summary = {}
-
-    for test in test_cases:
-        name = test["name"]
-        action = test["action"]
-        skip = test["skip_if_no_libs"]
-
-        print(f"\n--- Running Test: {name} ---")
-        print(f"Action: {action}")
-
-        if skip:
-            print(
-                "Skipping test due to missing library dependencies or LLM unavailability."
-            )
-            results_summary[name] = "SKIPPED (Dependency)"
-            continue
-
-        # Special handling for git commands depending on clone success
-        git_depends_on_clone = name in [
-            "Git Status",
-            "Git Log",
-            "Git Checkout (Branch)",
-            "Git Operation (Disallowed Command)",
-            "Git Operation (Dangerous Option)",
-        ]
-        if git_depends_on_clone and results_summary.get("Git Clone") != "PASSED":
-            print(
-                "Skipping test because prerequisite 'Git Clone' did not pass or was skipped."
-            )
-            results_summary[name] = "SKIPPED (Prereq Failed)"
-            continue
-        # Special handling for file commands depending on create success
-        file_depends_on_create = name in [
-            "Read File",
-            "Edit File (Append)",
-            "Read File (After Append)",
-            "Edit File (Replace)",
-            "Read File (After Replace)",
-            "Edit File (Insert)",
-            "Read File (After Insert)",
-            "Edit File (Delete Line)",
-            "Read File (After Delete)",
-        ]
-        if file_depends_on_create and results_summary.get("Create File") != "PASSED":
-            print(
-                "Skipping test because prerequisite 'Create File' did not pass or was skipped."
-            )
-            results_summary[name] = "SKIPPED (Prereq Failed)"
-            continue
-
-        output = execute_tool(action)
-        print(f"Output:\n{json.dumps(output, indent=2)}")  # Pretty print output dict
-
-        # Basic pass/fail check
-        passed = output.get("error") is None
-
-        # Specific checks for errors we expect
-        expected_error_tests = [
-            "Path Safety",
-            "Non-existent Tool",
-            "Invalid Format",
-            "Tool Requiring Arg (Missing)",
-            "API Call (Invalid Domain)",
-            "Git Operation (Disallowed",
-            "Git Operation (Dangerous",
-            "Nested Tool Call",
-            "Edit File (Invalid JSON)",
-            "Manage Goals (Invalid Action)",
-            "Manage Goals (Missing Field)",
-        ]
-        if any(name.startswith(prefix) for prefix in expected_error_tests):
-            passed = output.get("error") is not None  # Expect an error for these
-
-        # Specific checks for success we expect
-        expected_success_tests = [
-            "Tool Not Requiring Arg (Provided)",  # Expect no error, just maybe warning
-            "Create Subgoal",
-            "Manage Goals (Add Request)",
-            "Manage Goals (Update Request)",
-            "Manage Goals (Remove Request)",
-            "Monitor Environment (Placeholder)",  # Expect specific "Not Implemented" message, not error
-        ]
-        if any(name.startswith(prefix) for prefix in expected_success_tests):
-            passed = output.get("error") is None
-            # For monitor, check the result message specifically
-            if name == "Monitor Environment (Placeholder)":
-                passed = (
-                    passed
-                    and output.get("result")
-                    and "Tool Not Implemented" in output.get("result")
-                )
-
-        results_summary[name] = "PASSED" if passed else "FAILED"
-        print(f"Result: {results_summary[name]}")
-
-    print("\n\n--- Test Summary ---")
-    # Sort summary alphabetically for consistency
-    for name in sorted(results_summary.keys()):
-        result = results_summary[name]
-        print(f"{name:<50}: {result}")
-
-    # Final cleanup
-    print("\n--- Cleaning up test artifacts ---")
-    if test_dir_path.exists():
-        shutil.rmtree(test_dir_path)
-        print(f"Removed: {test_dir_path}")
-    if test_repo_path.exists():
-        shutil.rmtree(test_repo_path)
-        print(f"Removed: {test_repo_path}")
-    enhancement_log = WORKSPACE_DIR / "tool_enhancement_requests.log"
-    if enhancement_log.exists():
-        enhancement_log.unlink()
+# --- Example Usage (Updated) ---
+# if __name__ == "__main__":
+#     print("--- Initializing Workspace and Tools ---")

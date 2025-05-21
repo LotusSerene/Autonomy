@@ -1,0 +1,22 @@
+# Core Agent Dependencies
+google-generativeai
+langgraph
+python-dotenv
+qdrant-client
+
+# Tool Dependencies
+duckduckgo-search
+arxiv
+wikipedia
+requests
+
+# Web UI Dependencies
+Flask
+Flask-SocketIO
+# eventlet or gevent might be needed for production SocketIO deployment
+# eventlet
+# gevent
+# Note: Cytoscape.js is a client-side dependency (included via CDN in index.html)
+
+# Optional: For LangSmith Tracing
+# langsmith 

@@ -26,6 +26,9 @@ from llm_utils import (
 # Import tool utilities
 from tools import execute_tool, get_available_tools_list
 
+# NOTE: UI update functions (send_agent_update, send_brain_state) are no longer imported/used here.
+# The web_server will now process the graph stream and emit updates.
+
 # Load environment variables (especially for LangSmith)
 load_dotenv()
 
@@ -83,6 +86,7 @@ def start_run(state: AgentState) -> AgentState:
     print("--- Starting Run ---")
     run_id = str(uuid.uuid4())
     print(f"Run ID: {run_id}")
+    # UI Update: Handled by web_server stream processing
     return {"run_id": run_id}
 
 
@@ -90,6 +94,7 @@ def goal_evaluation(state: AgentState) -> AgentState:
     print("--- Evaluating Goal ---")
     initial_goal = state.get("initial_goal", "No initial goal provided.")
     run_id = state["run_id"]
+    # UI Update: Handled by web_server stream processing
 
     # Use Assistant LLM for potentially simpler goal refinement
     prompt = f"""Given the initial user request: '{initial_goal}', analyze it and refine it into a clear, actionable primary goal for an autonomous AI agent.
@@ -113,18 +118,24 @@ Refined Goal:"""
 
     # Store the goal in goal_memory
     goal_doc = {
-        "id": f"goal_{run_id}",
+        # "id": f"goal_{run_id}", # Use UUID for ID
         "goal": active_goal,
         "status": "active",
         "run_id": run_id,
     }
-    add_memory(qdrant_client, "goal_memory", [goal_doc], [active_goal])
+    # goal_id = str(uuid.uuid4()) # Let Qdrant auto-generate ID
+    # add_memory(qdrant_client, "goal_memory", [goal_doc], [active_goal], ids=[goal_id])
+    add_memory(
+        qdrant_client, "goal_memory", [goal_doc], [active_goal]
+    )  # Call without explicit IDs
+    # UI Update: Handled by web_server stream processing
 
     return {"active_goal": active_goal, "error_message": None}
 
 
 def sense_environment(state: AgentState) -> AgentState:
     print("--- Sensing Environment ---")
+    # UI Update: Handled by web_server stream processing
     # Placeholder: In a real scenario, this could involve API calls, sensor readings etc.
     # For now, let's just add a timestamp as an observation.
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -136,6 +147,7 @@ def sense_environment(state: AgentState) -> AgentState:
     #     observations.append(f"Result of last action: {str(last_result)[:100]}...") # Truncated
 
     print(f"Observations: {observations}")
+    # UI Update: Handled by web_server stream processing
     return {"environment_observations": observations}
 
 
@@ -145,9 +157,11 @@ def memory_retrieval(state: AgentState) -> AgentState:
     observations = state.get("environment_observations", [])
     # executed_actions = state.get("executed_actions", []) # Consider adding context from recent actions if needed
     run_id = state["run_id"]
+    # UI Update: Handled by web_server stream processing
 
     if not active_goal:
         print("Error: Active goal is not set.")
+        # UI Update: Handled by web_server stream processing
         return {"error_message": "Active goal not set for memory retrieval."}
 
     # --- Generate a focused query using Assistant LLM ---
@@ -163,6 +177,7 @@ def memory_retrieval(state: AgentState) -> AgentState:
     Search Query:"""
 
     print("Generating memory search query using Assistant LLM...")
+    # UI Update: Handled by web_server stream processing
     generated_query = generate_text(
         query_generation_prompt, assistant_llm
     )  # Use assistant_llm
@@ -172,11 +187,14 @@ def memory_retrieval(state: AgentState) -> AgentState:
             "Warning: LLM failed to generate a specific search query. Using goal as fallback."
         )
         query_text = active_goal  # Fallback to using the goal directly
+        # UI Update: Handled by web_server stream processing
     else:
         query_text = generated_query.strip()
         print(f"Generated Query: {query_text}")
+        # UI Update: Handled by web_server stream processing
     # --- End Query Generation ---
 
+    # UI Update: Handled by web_server stream processing
     # Search relevant memory types using the generated query
     episodic_mem = search_memory(qdrant_client, "episodic_memory", query_text, limit=3)
     semantic_mem = search_memory(qdrant_client, "semantic_memory", query_text, limit=2)
@@ -196,6 +214,8 @@ def memory_retrieval(state: AgentState) -> AgentState:
     print(
         f"Retrieved {len(retrieved_memories)} memories/tool descriptions using query: '{query_text}'"
     )
+    # UI Update: Handled by web_server stream processing
+
     # Clear any potential error from previous steps if memory retrieval itself succeeded
     return {"retrieved_memories": retrieved_memories, "error_message": None}
 
@@ -206,9 +226,11 @@ def planning(state: AgentState) -> AgentState:
     memories = state["retrieved_memories"]
     observations = state["environment_observations"]
     run_id = state["run_id"]
+    # UI Update: Handled by web_server stream processing
 
     if not active_goal:
         print("Error: Active goal is not set.")
+        # UI Update: Handled by web_server stream processing
         return {"error_message": "Active goal not set for planning."}
 
     # Extract tool descriptions from retrieved memories/list
@@ -226,6 +248,8 @@ def planning(state: AgentState) -> AgentState:
     general_memories = [
         mem for mem in memories if mem.get("source") != "tool_description"
     ]
+    # Limit memory size for prompt
+    prompt_memories = str(general_memories)[:1000]  # Truncate for prompt
 
     # Construct prompt for the LLM, explicitly mentioning tools
     prompt = f"""
@@ -238,8 +262,8 @@ def planning(state: AgentState) -> AgentState:
     Available Tools:
     {tool_info}
 
-    Relevant Information from Memory (use cautiously):
-    {general_memories if general_memories else "No relevant memories retrieved."}
+    Relevant Information from Memory (use cautiously, max 1000 chars):
+    {prompt_memories if prompt_memories else "No relevant memories retrieved."}
 
     Instructions:
     - Generate a concise, numbered list of actions for the agent.
@@ -259,6 +283,7 @@ def planning(state: AgentState) -> AgentState:
 
     if not plan_str:
         print("Error: LLM failed to generate a plan.")
+        # UI Update: Handled by web_server stream processing
         return {"error_message": "LLM failed to generate a plan."}
 
     # Basic parsing of the numbered list plan
@@ -268,9 +293,17 @@ def planning(state: AgentState) -> AgentState:
         if line.strip() and line.strip()[0].isdigit()
     ]
     if not plan:
-        plan = [plan_str.strip()]  # Fallback
+        # Fallback: Try parsing lines starting with '-' or '*' if no numbered list found
+        plan = [
+            line.strip()[2:]
+            for line in plan_str.split("\n")
+            if line.strip().startswith(("-", "*"))
+        ]
+        if not plan:  # If still no plan, use the whole string as one step
+            plan = [plan_str.strip()]
 
     print(f"Generated Plan: {plan}")
+    # UI Update: Handled by web_server stream processing
     return {"current_plan": plan}
 
 
@@ -282,12 +315,14 @@ def action_execution(state: AgentState) -> AgentState:
 
     if not plan:
         print("Notice: No plan to execute.")
+        # UI Update: Handled by web_server stream processing
         # No error here, could be end of plan. Let should_continue decide.
         return {"error_message": None}  # Clear any previous transient error
 
     action_step = plan[0]
     remaining_plan = plan[1:]
     print(f"Attempting action: {action_step}")
+    # UI Update: Handled by web_server stream processing
 
     # Check if it looks like a tool call
     if "[" in action_step and action_step.endswith("]"):
@@ -300,11 +335,15 @@ def action_execution(state: AgentState) -> AgentState:
 
         if action_error:
             print(f"Error executing tool: {action_error}")
+            # UI Update: Handled by web_server stream processing
             # Decide how to handle tool errors - stop run? try to replan?
             # For now, record the error and let reflection/loop decide.
             action_outcome = f"Error: {action_error}"  # Store error as outcome
             # Optionally set a graph-level error to force end/replan
             # return {"error_message": f"Tool execution failed: {action_error}"}
+        else:
+            # UI Update: Handled by web_server stream processing
+            pass  # No specific update needed here beyond brain state
     else:
         # Assume it's an internal step (e.g., analysis, summarization)
         # For now, we just acknowledge it. Later, this could involve LLM calls.
@@ -313,20 +352,22 @@ def action_execution(state: AgentState) -> AgentState:
         argument = None
         action_outcome = f"Internal step '{action_step}' acknowledged."
         action_error = None
+        # UI Update: Handled by web_server stream processing
 
     print(f"Action Outcome: {action_outcome[:200]}...")  # Log truncated outcome
 
     # Record the execution attempt
-    executed_actions_history.append(
-        {
-            "action": action_step,
-            "tool_name": tool_name,
-            "argument": argument,
-            "result": action_outcome,  # Store outcome (could be result or error message)
-            "error": action_error,  # Store specific error if one occurred
-            "run_id": run_id,
-        }
-    )
+    executed_action_record = {
+        "action": action_step,
+        "tool_name": tool_name,
+        "argument": argument,
+        "result": action_outcome,  # Store outcome (could be result or error message)
+        "error": action_error,  # Store specific error if one occurred
+        "run_id": run_id,
+    }
+    executed_actions_history.append(executed_action_record)
+
+    # UI Update: Handled by web_server stream processing
 
     # Update state: remove executed step, add record, clear transient error
     return {
@@ -342,9 +383,11 @@ def reflection(state: AgentState) -> AgentState:
     active_goal = state["active_goal"]
     current_plan = state.get("current_plan", [])
     run_id = state["run_id"]
+    # UI Update: Handled by web_server stream processing
 
     if not executed_actions:
         print("No actions executed yet, skipping reflection.")
+        # UI Update: Handled by web_server stream processing
         # If no actions, assume we continue with the plan if one exists
         decision = (
             "continue" if current_plan else "achieved"
@@ -354,13 +397,17 @@ def reflection(state: AgentState) -> AgentState:
     last_action_record = executed_actions[-1]
 
     # Construct prompt for reflection, asking for a specific decision keyword
+    # Truncate result/outcome for the prompt to avoid excessive length
+    truncated_outcome = str(last_action_record["result"])[:500] + (
+        "..." if len(str(last_action_record["result"])) > 500 else ""
+    )
     prompt = f"""
     Goal: {active_goal}
     Current Plan Remaining: {current_plan if current_plan else 'None'}
     Last Action Taken: {last_action_record['action']}
     Tool Used: {last_action_record['tool_name']}
     Argument: {last_action_record['argument']}
-    Result/Outcome: {last_action_record['result']}
+    Result/Outcome (Truncated): {truncated_outcome}
     Error During Execution: {last_action_record['error'] if last_action_record['error'] else 'None'}
 
     Reflect on the progress towards the goal based on the last action's outcome.
@@ -385,6 +432,7 @@ def reflection(state: AgentState) -> AgentState:
         reflection_text = "Reflection failed."
         decision = "failed"  # If reflection fails, assume failure
         print("Error: LLM failed to generate reflection.")
+        # UI Update: Handled by web_server stream processing
     else:
         print(f"Reflection Output (raw): {reflection_text}")
         # Attempt to parse the decision keyword
@@ -396,14 +444,18 @@ def reflection(state: AgentState) -> AgentState:
         if match:
             decision = match.group(1).lower()
             print(f"Parsed Decision: {decision}")
+            # UI Update: Handled by web_server stream processing
         else:
             print(
                 "Warning: Could not parse decision keyword from reflection. Defaulting to 'continue'."
             )
             decision = "continue"  # Default if parsing fails
+            # UI Update: Handled by web_server stream processing
 
     insights = state.get("reflection_insights", [])
     insights.append(reflection_text)  # Store the full reflection text
+
+    # UI Update: Handled by web_server stream processing
 
     # Store the parsed decision in the state
     return {"reflection_insights": insights, "last_reflection_decision": decision}
@@ -417,6 +469,7 @@ def memory_update(state: AgentState) -> AgentState:
 
     if not executed_actions:
         print("No actions executed, nothing to store in memory.")
+        # UI Update: Handled by web_server stream processing
         return {}
 
     last_action_record = executed_actions[-1]
@@ -424,11 +477,12 @@ def memory_update(state: AgentState) -> AgentState:
     now_iso = datetime.datetime.now(
         datetime.timezone.utc
     ).isoformat()  # Get current UTC timestamp
+    # UI Update: Handled by web_server stream processing
 
     # Create documents to store
     # Episodic memory: What happened? Include tool info and error status
     episodic_doc = {
-        "id": f"ep_{run_id}_{len(executed_actions)}",
+        # "id": f"ep_{run_id}_{len(executed_actions)}", # ID managed by Qdrant/vector
         "run_id": run_id,
         "action": last_action_record["action"],
         "tool_name": last_action_record["tool_name"],
@@ -439,6 +493,7 @@ def memory_update(state: AgentState) -> AgentState:
         "error": last_action_record["error"],  # Explicitly store error
         "timestamp": now_iso,  # Use the actual timestamp
     }
+    episodic_id = str(uuid.uuid4())  # Generate UUID
     # Text for embedding should represent the key event
     episodic_text = f"Action taken: {last_action_record['action']}. Tool: {last_action_record['tool_name']}. Outcome: {last_action_record['result'][:100]}..."  # Truncate long results
     if last_action_record["error"]:
@@ -447,18 +502,25 @@ def memory_update(state: AgentState) -> AgentState:
 
     # Semantic memory: What was learned?
     semantic_doc = {
-        "id": f"sem_{run_id}_{len(insights)}",
+        # "id": f"sem_{run_id}_{len(insights)}", # ID managed by Qdrant/vector
         "run_id": run_id,
         "insight": last_insight,
         "related_action": last_action_record["action"],
         "goal": state.get("active_goal", "Unknown"),  # Associate insight with goal
         "timestamp": now_iso,  # Also timestamp the insight
     }
+    # semantic_id = str(uuid.uuid4()) # Let Qdrant auto-generate ID
     semantic_text = f"Insight regarding goal '{state.get('active_goal', 'Unknown')}' at {now_iso}: {last_insight}"
 
-    # Add to Qdrant
-    add_memory(qdrant_client, "episodic_memory", [episodic_doc], [episodic_text])
-    add_memory(qdrant_client, "semantic_memory", [semantic_doc], [semantic_text])
+    # Add to Qdrant with generated UUIDs
+    # add_memory(qdrant_client, "episodic_memory", [episodic_doc], [episodic_text], ids=[episodic_id])
+    # add_memory(qdrant_client, "semantic_memory", [semantic_doc], [semantic_text], ids=[semantic_id])
+    add_memory(
+        qdrant_client, "episodic_memory", [episodic_doc], [episodic_text]
+    )  # Call without explicit IDs
+    add_memory(
+        qdrant_client, "semantic_memory", [semantic_doc], [semantic_text]
+    )  # Call without explicit IDs
 
     print(
         f"Stored episodic and semantic memory for action: {last_action_record['action']}"
@@ -504,10 +566,12 @@ def should_continue(state: AgentState) -> str:
     error = state.get("error_message")
     decision = state.get("last_reflection_decision")
     plan = state.get("current_plan", [])
+    # UI Update: Handled by web_server stream processing
 
     # Prioritize hard errors from the graph execution itself
     if error:
         print(f"Graph error detected: {error}. Ending run.")
+        # UI Update: Handled by web_server stream processing
         return "end"  # Route to END state
 
     print(f"Reflection Decision: {decision}")
@@ -516,12 +580,15 @@ def should_continue(state: AgentState) -> str:
     # Use the decision from the reflection node
     if decision == "achieved":
         print("Reflection indicates goal achieved. Ending run.")
+        # UI Update: Handled by web_server stream processing
         return "end"
     elif decision == "failed":
         print("Reflection indicates goal failed or unrecoverable error. Ending run.")
+        # UI Update: Handled by web_server stream processing
         return "end"
     elif decision == "replan":
         print("Reflection suggests replanning is needed.")
+        # UI Update: Handled by web_server stream processing
         return "replan"  # Route back to planning
     elif decision == "continue":
         # If reflection says continue, check if there's actually a plan left
@@ -529,20 +596,25 @@ def should_continue(state: AgentState) -> str:
             print(
                 "Plan complete (reflection said continue, but no steps left). Ending run."
             )
+            # UI Update: Handled by web_server stream processing
             return "end"
         else:
             print(
                 "Plan has remaining steps and reflection indicates continue. Continuing execution."
             )
+            # UI Update: Handled by web_server stream processing
             return "continue_execution"  # Route to next action
     else:
         # Fallback if decision is missing or invalid (shouldn't happen ideally)
         print("Warning: Invalid or missing reflection decision. Checking plan status.")
+        # UI Update: Handled by web_server stream processing
         if not plan:
             print("Plan complete (fallback). Ending run.")
+            # UI Update: Handled by web_server stream processing
             return "end"
         else:
             print("Plan has remaining steps (fallback). Continuing execution.")
+            # UI Update: Handled by web_server stream processing
             return "continue_execution"
 
 
@@ -561,63 +633,7 @@ workflow.add_conditional_edges(
 app = workflow.compile()
 
 # --- Running the Agent (Example) ---
-if __name__ == "__main__":
-    # Ensure API keys are loaded (redundant if load_dotenv() called globally, but safe)
-    load_dotenv()
-    if not os.getenv("GOOGLE_API_KEY"):
-        print("Error: GOOGLE_API_KEY not found. Please set it in your .env file.")
-    elif not os.getenv("LANGCHAIN_API_KEY"):
-        print(
-            "Warning: LANGCHAIN_API_KEY not found. LangSmith tracing will be disabled."
-        )
-        # You might want to disable tracing explicitly if the key is missing
-        # os.environ["LANGCHAIN_TRACING_V2"] = "false"
-    else:
-        print(
-            "API keys loaded. LangSmith tracing is configured (if LANGCHAIN_TRACING_V2 is 'true')."
-        )
-        print(f"Using Main Model: {MAIN_MODEL_NAME}")  # Log model names - NOW DEFINED
-        print(
-            f"Using Assistant Model: {ASSISTANT_MODEL_NAME}"
-        )  # Log model names - NOW DEFINED
-
-    inputs = {
-        "initial_goal": "What is the latest news about the Perseverance rover on Mars?"
-    }
-    # Use stream to see events step-by-step
-    for event in app.stream(
-        inputs, {"recursion_limit": 15}
-    ):  # Increase recursion limit slightly
-        # The 'event' yielded by stream might not always have the structure {node_name: state_dict}
-        # Sometimes, other event types might be yielded, or a node might finish without returning a standard state update.
-        # It's safer to check if 'value' is actually a dictionary before trying to access keys.
-        print(
-            f"\nRaw Event: {event}"
-        )  # Add this line to see what kind of events are yielded
-        for key, value in event.items():
-            print(f"--- Node/Key: {key} ---")
-            # Check if 'value' is a dictionary before trying to access its items
-            if isinstance(value, dict):
-                # Print specific state keys for clarity
-                print(f" Active Goal: {value.get('active_goal')}")
-                print(f" Plan: {value.get('current_plan')}")
-                print(f" Executed Actions: {len(value.get('executed_actions', []))}")
-                if value.get("executed_actions"):
-                    print(f" Last Action: {value['executed_actions'][-1]['action']}")
-                    print(
-                        f" Last Result: {str(value['executed_actions'][-1]['result'])[:200]}..."
-                    )  # Truncate long results
-                    print(f" Last Error: {value['executed_actions'][-1]['error']}")
-                if value.get("reflection_insights"):
-                    print(f" Last Insight: {value['reflection_insights'][-1][:200]}...")
-                print(f" Graph Error: {value.get('error_message')}")
-            else:
-                # Handle cases where 'value' is not a dictionary (e.g., None or other data)
-                print(f" Value is not a dictionary: {value}")
-            print("-" * 20)
-
-    # Or use invoke for final state
-    # final_state = app.invoke(inputs, {"recursion_limit": 10})
-    # print("\n--- Agent Run Complete ---")
-    # print("Final State:")
-    # print(final_state)
+# The __main__ block below is removed as the agent will now be run by the web_server.
+# if __name__ == "__main__":
+#     # ... (previous main block code removed) ...
+#     pass # Keep the file runnable for potential direct imports or testing
