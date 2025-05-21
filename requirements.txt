@@ -1,0 +1,9 @@
+Flask~=3.0.0
+google-generativeai~=0.5.0
+qdrant-client~=1.7.3
+python-dotenv~=1.0.0
+langgraph~=0.0.48
+duckduckgo-search~=6.1.0
+arxiv~=2.1.0
+wikipedia~=1.4.0
+requests~=2.31.0

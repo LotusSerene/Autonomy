@@ -3,13 +3,20 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from typing import List, Dict, Any, Optional
 import time  # Import time for potential retries/delays
+import logging
 
 # Load environment variables
 load_dotenv()
 
+# Create a logger instance
+logger = logging.getLogger(__name__)
+
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:
+    # This error is critical, so using raise is appropriate.
+    # Logging can be added here if desired, but the raise will stop execution.
+    logger.error("GOOGLE_API_KEY not found in environment variables.")
     raise ValueError("GOOGLE_API_KEY not found in environment variables.")
 
 # Configure the generative AI client
@@ -31,10 +38,10 @@ def get_main_model():
     """Returns an instance of the configured main generative model."""
     try:
         model = genai.GenerativeModel(MAIN_MODEL_NAME)
-        print(f"Main generative model '{MAIN_MODEL_NAME}' initialized.")
+        logger.info(f"Main generative model '{MAIN_MODEL_NAME}' initialized.")
         return model
     except Exception as e:
-        print(f"Error initializing main generative model: {e}")
+        logger.exception(f"Error initializing main generative model: {e}")
         raise
 
 
@@ -42,10 +49,10 @@ def get_assistant_model():
     """Returns an instance of the configured assistant generative model."""
     try:
         model = genai.GenerativeModel(ASSISTANT_MODEL_NAME)
-        print(f"Assistant generative model '{ASSISTANT_MODEL_NAME}' initialized.")
+        logger.info(f"Assistant generative model '{ASSISTANT_MODEL_NAME}' initialized.")
         return model
     except Exception as e:
-        print(f"Error initializing assistant generative model: {e}")
+        logger.exception(f"Error initializing assistant generative model: {e}")
         raise
 
 
@@ -62,13 +69,13 @@ def generate_text(prompt: str, model=None) -> Optional[str]:
     """
     if model is None:
         # Default to the assistant model if none is specified explicitly
-        print(
-            "Warning: generate_text called without explicit model, defaulting to assistant model."
+        logger.warning(
+            "generate_text called without explicit model, defaulting to assistant model."
         )
         model = get_assistant_model()
 
-    print(f"\n--- Generating Text using {model.model_name} ---")
-    print(f"Prompt: {prompt[:100]}...")  # Log truncated prompt
+    logger.info(f"--- Generating Text using {model.model_name} ---")
+    logger.info(f"Prompt: {prompt[:100]}...")  # Log truncated prompt
     retries = 0
     while retries < MAX_RETRIES:
         try:
@@ -76,25 +83,25 @@ def generate_text(prompt: str, model=None) -> Optional[str]:
 
             # Check if response has text
             if response.parts:
-                print(f"Response: {response.text[:100]}...")  # Log truncated response
+                logger.info(f"Response: {response.text[:100]}...")  # Log truncated response
                 return response.text
 
             # If no text, check for blocking or other issues
-            print("Warning: Received empty response part from LLM.")
-            print(f"Full Response: {response}")  # Log full response for debugging
+            logger.warning("Received empty response part from LLM.")
+            logger.warning(f"Full Response: {response}")  # Log full response for debugging
 
             # Check for prompt feedback (e.g., safety blocks)
             if hasattr(response, "prompt_feedback") and response.prompt_feedback:
-                print(f"Prompt Feedback: {response.prompt_feedback}")
+                logger.error(f"Prompt Feedback: {response.prompt_feedback}")
                 # Return None or raise specific error if prompt was blocked
                 return f"Error: Prompt blocked due to safety settings - {response.prompt_feedback}"
 
             # Check finish reason in candidates
             if hasattr(response, "candidates") and response.candidates:
                 candidate = response.candidates[0]
-                print(f"Candidate Finish Reason: {candidate.finish_reason}")
+                logger.warning(f"Candidate Finish Reason: {candidate.finish_reason}")
                 if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
-                    print(f"Candidate Safety Ratings: {candidate.safety_ratings}")
+                    logger.warning(f"Candidate Safety Ratings: {candidate.safety_ratings}")
                 # Handle specific finish reasons if necessary
                 if candidate.finish_reason != "STOP":
                     return f"Error: Generation stopped unexpectedly - Reason: {candidate.finish_reason}"
@@ -103,15 +110,15 @@ def generate_text(prompt: str, model=None) -> Optional[str]:
             return None
 
         except Exception as e:
-            print(
-                f"Error during text generation (Attempt {retries + 1}/{MAX_RETRIES}): {e}"
+            logger.error(
+                f"Error during text generation (Attempt {retries + 1}/{MAX_RETRIES}): {e}", exc_info=True
             )
             retries += 1
             if retries < MAX_RETRIES:
-                print(f"Retrying in {RETRY_DELAY_SECONDS} seconds...")
+                logger.info(f"Retrying in {RETRY_DELAY_SECONDS} seconds...")
                 time.sleep(RETRY_DELAY_SECONDS)
             else:
-                print("Max retries reached. Failed to generate text.")
+                logger.error("Max retries reached. Failed to generate text.")
                 return None  # Return None after max retries
 
     return None  # Should not be reached if loop logic is correct, but as a safeguard
@@ -138,10 +145,10 @@ def generate_embeddings(
         after retries.
     """
     if not texts:
-        print("Warning: generate_embeddings called with empty list.")
+        logger.warning("generate_embeddings called with empty list.")
         return []
 
-    print(
+    logger.info(
         f"Generating embeddings for {len(texts)} text(s) using model '{model_name}' with task type '{task_type}'..."
     )
 
@@ -152,20 +159,20 @@ def generate_embeddings(
             result = genai.embed_content(
                 model=model_name, content=texts, task_type=task_type
             )
-            print(f"Successfully generated {len(result['embedding'])} embeddings.")
+            logger.info(f"Successfully generated {len(result['embedding'])} embeddings.")
             return result["embedding"]
         except Exception as e:
-            print(
-                f"Error generating embeddings (Attempt {retries + 1}/{MAX_RETRIES}): {e}"
+            logger.error(
+                f"Error generating embeddings (Attempt {retries + 1}/{MAX_RETRIES}): {e}", exc_info=True
             )
             retries += 1
             if retries < MAX_RETRIES:
                 # Check for specific retryable errors if possible (e.g., rate limits)
                 # For now, retry on any exception
-                print(f"Retrying in {RETRY_DELAY_SECONDS} seconds...")
+                logger.info(f"Retrying in {RETRY_DELAY_SECONDS} seconds...")
                 time.sleep(RETRY_DELAY_SECONDS)
             else:
-                print("Max retries reached. Failed to generate embeddings.")
+                logger.error("Max retries reached. Failed to generate embeddings.")
                 return None  # Return None after max retries
 
     return None  # Should not be reached, safeguard return
@@ -178,36 +185,36 @@ if __name__ == "__main__":
         main_model_instance = get_main_model()
         assistant_model_instance = get_assistant_model()
     except Exception as e:
-        print(f"Failed to initialize models for example usage: {e}")
+        logger.exception(f"Failed to initialize models for example usage: {e}")
         exit()
 
     test_prompt_complex = "Develop a multi-step plan to research the effectiveness of various memory retrieval strategies for autonomous agents."
-    print("\n--- Testing Main Model ---")
+    logger.info("\n--- Testing Main Model ---")
     generated_text_main = generate_text(test_prompt_complex, model=main_model_instance)
 
     if generated_text_main:
-        print("\n--- Generated Text (Main) ---")
+        logger.info("\n--- Generated Text (Main) ---")
         if generated_text_main.startswith("Error:"):
-            print(f"Generation failed: {generated_text_main}")
+            logger.error(f"Generation failed: {generated_text_main}")
         else:
-            print(generated_text_main)
+            logger.info(generated_text_main)
     else:
-        print("\nFailed to generate text with main model after retries.")
+        logger.error("\nFailed to generate text with main model after retries.")
 
     test_prompt_simple = "Generate a short search query for 'latest Mars rover news'."
-    print("\n--- Testing Assistant Model ---")
+    logger.info("\n--- Testing Assistant Model ---")
     generated_text_assistant = generate_text(
         test_prompt_simple, model=assistant_model_instance
     )
 
     if generated_text_assistant:
-        print("\n--- Generated Text (Assistant) ---")
+        logger.info("\n--- Generated Text (Assistant) ---")
         if generated_text_assistant.startswith("Error:"):
-            print(f"Generation failed: {generated_text_assistant}")
+            logger.error(f"Generation failed: {generated_text_assistant}")
         else:
-            print(generated_text_assistant)
+            logger.info(generated_text_assistant)
     else:
-        print("\nFailed to generate text with assistant model after retries.")
+        logger.error("\nFailed to generate text with assistant model after retries.")
 
     # Example embedding generation
     test_texts = ["Hello world", "This is a test.", "How does embedding work?"]
@@ -215,10 +222,10 @@ if __name__ == "__main__":
         test_texts, task_type="SEMANTIC_SIMILARITY"
     )  # Example task type
     if embeddings:
-        print("\n--- Generated Embeddings ---")
-        print(f"Number of embeddings: {len(embeddings)}")
-        if embeddings:
-            print(f"Dimension of first embedding: {len(embeddings[0])}")
-            # print(f"First embedding (truncated): {embeddings[0][:10]}...") # Optional: view part of the vector
+        logger.info("\n--- Generated Embeddings ---")
+        logger.info(f"Number of embeddings: {len(embeddings)}")
+        if embeddings: # This check is redundant due to the outer `if embeddings:`
+            logger.info(f"Dimension of first embedding: {len(embeddings[0])}")
+            # logger.debug(f"First embedding (truncated): {embeddings[0][:10]}...") # Optional: view part of the vector
     else:
-        print("\nFailed to generate embeddings after retries.")
+        logger.error("\nFailed to generate embeddings after retries.")

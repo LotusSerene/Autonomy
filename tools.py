@@ -9,28 +9,33 @@ from pathlib import Path  # Added for path validation
 import uuid  # Added for potential ID generation if needed
 
 # --- Workspace Configuration (Example) ---
+import logging
+
+# Create a logger instance
+logger = logging.getLogger(__name__)
+
 # Define a base directory to restrict file operations for security
 WORKSPACE_DIR = Path(
     os.getenv("AGENT_WORKSPACE", Path.cwd() / "agent_workspace")
 ).resolve()
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)  # Ensure workspace exists
-print(f"--- File operations restricted to: {WORKSPACE_DIR} ---")
+logger.info(f"File operations restricted to: {WORKSPACE_DIR}")
 
 # --- LLM Utilities (Import for specific tools) ---
 try:
     from llm_utils import generate_text, get_main_model, get_assistant_model
 
     LLM_AVAILABLE = True
-    print("LLM utilities loaded successfully.")
+    logger.info("LLM utilities loaded successfully.")
 except ImportError:
-    print(
-        "Warning: llm_utils not found or failed to import. LLM-dependent tools will not be available."
+    logger.warning(
+        "llm_utils not found or failed to import. LLM-dependent tools will not be available."
     )
     LLM_AVAILABLE = False
 
     # Define dummy functions if LLM utils are not available
     def generate_text(prompt: str, model=None) -> Optional[str]:
-        print(f"LLM UNAVAILABLE. Cannot process prompt: {prompt[:100]}...")
+        logger.error(f"LLM UNAVAILABLE. Cannot process prompt: {prompt[:100]}...")
         return None
 
     def get_main_model():
@@ -61,33 +66,33 @@ try:
 
     def web_search(query: str, max_results: int = 3) -> str:
         """Performs a web search using DuckDuckGo. Returns JSON string of results."""
-        print(f"--- Executing Web Search Tool ---")
-        print(f"Query: {query}")
+        logger.info("Executing Web Search Tool")
+        logger.info(f"Query: {query}")
         try:
             # Ensure max_results is an integer
             try:
                 max_r = int(max_results)
             except (ValueError, TypeError):
-                print(f"Warning: Invalid max_results '{max_results}', using default 3.")
+                logger.warning(f"Invalid max_results '{max_results}', using default 3.")
                 max_r = 3
 
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=max_r))
-            print(f"Found {len(results)} results.")
+            logger.info(f"Found {len(results)} results.")
             return json.dumps(results) if results else "No results found."
         except Exception as e:
-            print(f"Error during web search: {e}")
+            logger.error(f"Error during web search: {e}", exc_info=True)
             return f"Error performing web search: {e}"
 
 except ImportError:
-    print(
-        "Warning: duckduckgo-search not installed. Web search tool will not be available."
+    logger.warning(
+        "duckduckgo-search not installed. Web search tool will not be available."
     )
-    print("Install using: pip install duckduckgo-search")
+    logger.info("Install using: pip install duckduckgo-search")
 
     def web_search(query: str, max_results: int = 3) -> str:
         """Placeholder if duckduckgo-search is not installed."""
-        print("--- Web Search Tool (Not Available) ---")
+        logger.error("Web Search Tool (Not Available)")
         return "Error: Web search tool requires 'duckduckgo-search' library."
 
 
@@ -101,14 +106,14 @@ try:
         Input is the search query string. max_results defaults to 3.
         Returns a JSON string of search results.
         """
-        print(f"--- Executing ArXiv Search Tool ---")
-        print(f"Query: {query}, Max Results: {max_results}")
+        logger.info("Executing ArXiv Search Tool")
+        logger.info(f"Query: {query}, Max Results: {max_results}")
         try:
             # Ensure max_results is an integer
             try:
                 max_r = int(max_results)
             except (ValueError, TypeError):
-                print(f"Warning: Invalid max_results '{max_results}', using default 3.")
+                logger.warning(f"Invalid max_results '{max_results}', using default 3.")
                 max_r = 3
 
             search = arxiv.Search(
@@ -132,21 +137,21 @@ try:
                         "comment": result.comment,  # Add comment field if available
                     }
                 )
-            print(f"Found {len(results)} results on ArXiv.")
+            logger.info(f"Found {len(results)} results on ArXiv.")
             return json.dumps(results) if results else "No results found on ArXiv."
         except Exception as e:
-            print(f"Error during ArXiv search: {e}")
+            logger.error(f"Error during ArXiv search: {e}", exc_info=True)
             return f"Error performing ArXiv search: {e}"
 
 except ImportError:
-    print(
-        "Warning: arxiv library not installed. ArXiv search tool will not be available."
+    logger.warning(
+        "arxiv library not installed. ArXiv search tool will not be available."
     )
-    print("Install using: pip install arxiv")
+    logger.info("Install using: pip install arxiv")
 
     def arxiv_search(query: str, max_results: int = 3) -> str:
         """Placeholder if arxiv is not installed."""
-        print("--- ArXiv Search Tool (Not Available) ---")
+        logger.error("ArXiv Search Tool (Not Available)")
         return "Error: ArXiv search tool requires 'arxiv' library."
 
 
@@ -159,8 +164,8 @@ try:
         Searches Wikipedia for a summary. Input is the search query string.
         Returns the summary text or an error message.
         """
-        print(f"--- Executing Wikipedia Search Tool ---")
-        print(f"Query: {query}")
+        logger.info("Executing Wikipedia Search Tool")
+        logger.info(f"Query: {query}")
         try:
             # Set language if needed: wikipedia.set_lang("en")
             # Auto suggest can help with ambiguous queries
@@ -171,27 +176,29 @@ try:
             summary = wikipedia.summary(
                 query, sentences=3, auto_suggest=True, redirect=True
             )
-            print(f"Found Wikipedia summary for '{query}'.")
+            logger.info(f"Found Wikipedia summary for '{query}'.")
             return summary
         except wikipedia.exceptions.PageError:
+            logger.warning(f"Wikipedia page not found for '{query}'.")
             return f"Error: Wikipedia page not found for '{query}'."
         except wikipedia.exceptions.DisambiguationError as e:
             # Return options if the query is ambiguous
             options = ", ".join(e.options[:5])  # Limit options shown
+            logger.warning(f"Ambiguous query '{query}'. Wikipedia suggests: {options}.")
             return f"Error: Ambiguous query '{query}'. Wikipedia suggests: {options}. Please be more specific."
         except Exception as e:
-            print(f"Error during Wikipedia search: {e}")
+            logger.error(f"Error during Wikipedia search: {e}", exc_info=True)
             return f"Error performing Wikipedia search: {e}"
 
 except ImportError:
-    print(
-        "Warning: wikipedia library not installed. Wikipedia search tool will not be available."
+    logger.warning(
+        "wikipedia library not installed. Wikipedia search tool will not be available."
     )
-    print("Install using: pip install wikipedia")
+    logger.info("Install using: pip install wikipedia")
 
     def wikipedia_search(query: str) -> str:
         """Placeholder if wikipedia is not installed."""
-        print("--- Wikipedia Search Tool (Not Available) ---")
+        logger.error("Wikipedia Search Tool (Not Available)")
         return "Error: Wikipedia search tool requires 'wikipedia' library."
 
 
@@ -202,8 +209,8 @@ def read_file(filepath: str) -> str:
     Returns the file content (up to 4000 chars) or an error message.
     \n   [Security Risk: Medium - Operates within workspace/allowed domains]
     """
-    print(f"--- Executing Read File Tool ---")
-    print(f"Requested Filepath: {filepath}")
+    logger.info("Executing Read File Tool")
+    logger.info(f"Requested Filepath: {filepath}")
     try:
         # Resolve the path relative to the workspace if it's not absolute
         target_path = Path(filepath)
@@ -233,10 +240,11 @@ def read_file(filepath: str) -> str:
             target_path, "r", encoding="utf-8", errors="ignore"
         ) as f:  # Ignore decoding errors
             content = f.read()
-        print(f"Successfully read file: {target_path}")
+        logger.info(f"Successfully read file: {target_path}")
         # Limit output size returned to the LLM
         MAX_OUTPUT_CHARS = 4000
         if len(content) > MAX_OUTPUT_CHARS:
+            logger.info(f"File content truncated to {MAX_OUTPUT_CHARS} characters.")
             return (
                 content[:MAX_OUTPUT_CHARS]
                 + f"\n... [truncated, total {len(content)} chars]"
@@ -244,6 +252,7 @@ def read_file(filepath: str) -> str:
         else:
             return content
     except Exception as e:
+        logger.error(f"Error reading file '{filepath}': {e}", exc_info=True)
         return f"Error reading file '{filepath}': {e}"
 
 
@@ -259,8 +268,8 @@ def edit_file(instructions: str) -> str:
     \n   [Security Risk: High - Use with caution and specific instructions]
     """
     # IMPORTANT: VERY HIGH RISK. Needs strict validation, sandboxing, backups.
-    print(f"--- Executing Edit File Tool ---")
-    print(f"Instructions: {instructions}")
+    logger.info("Executing Edit File Tool")
+    logger.info(f"Instructions: {instructions}")
     filepath = None  # Initialize filepath for error reporting
     try:
         params = json.loads(instructions)
@@ -375,19 +384,23 @@ def edit_file(instructions: str) -> str:
             # Optional: Create a backup before writing
             # backup_path = target_path.with_suffix(target_path.suffix + '.bak')
             # shutil.copy2(target_path, backup_path)
-            # print(f"Created backup: {backup_path}")
+            # logger.info(f"Created backup: {backup_path}")
 
             with open(target_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
+            logger.info(f"File '{target_path}' edited successfully (action: {action}).")
             return f"File '{target_path}' edited successfully (action: {action})."
         else:
+            logger.info(f"File '{target_path}' not modified (action: {action}, no changes needed or text not found).")
             return f"File '{target_path}' not modified (action: {action}, no changes needed or text not found)."
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format in instructions: {instructions}: {e}", exc_info=True)
         return f"Error: Invalid JSON format in instructions: {instructions}"
     except Exception as e:
         # Include filepath in the error message if available
         filepath_str = f" '{filepath}'" if filepath else ""
+        logger.error(f"Error editing file{filepath_str}: {e}", exc_info=True)
         return f"Error editing file{filepath_str}: {e}"
 
 
@@ -432,8 +445,8 @@ try:
         Returns the API response text/JSON (up to 4000 chars) or an error message.
         \n   [Security Risk: Medium - Operates within workspace/allowed domains]
         """
-        print(f"--- Executing API Call Tool ---")
-        print(f"Request Details: {request_details}")
+        logger.info("Executing API Call Tool")
+        logger.info(f"Request Details: {request_details}")
         url = None  # Initialize for error reporting
         try:
             params = json.loads(request_details)
@@ -477,7 +490,7 @@ try:
             # Raise an exception for bad status codes (4xx or 5xx)
             response.raise_for_status()
 
-            print(
+            logger.info(
                 f"API call to {url} ({method}) successful (Status: {response.status_code})."
             )
 
@@ -493,6 +506,7 @@ try:
                 response_text = response.text  # Return raw text
 
             if len(response_text) > MAX_RESPONSE_CHARS:
+                logger.info(f"API response truncated to {MAX_RESPONSE_CHARS} characters.")
                 return (
                     response_text[:MAX_RESPONSE_CHARS]
                     + f"\n... [truncated, total {len(response_text)} chars]"
@@ -500,11 +514,12 @@ try:
             else:
                 return response_text
 
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON format in request_details: {request_details}: {e}", exc_info=True)
             return f"Error: Invalid JSON format in request_details: {request_details}"
         except requests.exceptions.RequestException as e:
             url_str = f" to {url}" if url else ""
-            print(f"Error during API call{url_str}: {e}")
+            logger.error(f"Error during API call{url_str}: {e}", exc_info=True)
             # Try to include response body in error if available
             error_detail = str(e)
             if e.response is not None:
@@ -516,18 +531,18 @@ try:
             return f"Error performing API call: {error_detail}"
         except Exception as e:
             url_str = f" to {url}" if url else ""
-            print(f"Unexpected error during API call{url_str}: {e}")
+            logger.error(f"Unexpected error during API call{url_str}: {e}", exc_info=True)
             return f"Unexpected error during API call: {e}"
 
 except ImportError:
-    print(
-        "Warning: requests library not installed. API call tools will not be available."
+    logger.warning(
+        "requests library not installed. API call tools will not be available."
     )
-    print("Install using: pip install requests")
+    logger.info("Install using: pip install requests")
 
     def api_call(request_details: str) -> str:
         """Placeholder if requests is not installed."""
-        print("--- API Call Tool (Not Available) ---")
+        logger.error("API Call Tool (Not Available)")
         return "Error: API call tool requires 'requests' library."
 
     def _is_domain_allowed(url: str) -> bool:
@@ -542,17 +557,19 @@ def datausa_api(query_params: str) -> str:
            (data_source is often inferred by the API based on measures/geo).
     Returns the API response JSON or an error message.
     """
-    print(f"--- Executing Data USA API Tool ---")
-    print(f"Query Params: {query_params}")
+    logger.info("Executing Data USA API Tool")
+    logger.info(f"Query Params: {query_params}")
     base_url = "https://datausa.io/api/data"
     try:
         # Check if requests library is available (needed by api_call)
-        if "requests" not in sys.modules:
+        if "requests" not in sys.modules: # type: ignore[ usado-before-def ]
+            logger.error("Data USA API tool requires 'requests' for 'api_call'.")
             return "Error: Data USA API tool requires the 'requests' library to be installed for the underlying 'api_call' tool."
 
         # Parse the input string into a dictionary
         params_dict = json.loads(query_params)
         if not isinstance(params_dict, dict):
+            logger.error("Input for Data USA API must be a JSON object.")
             return "Error: Input must be a JSON object (dictionary)."
 
         # Construct the request details for the generic api_call tool
@@ -562,9 +579,11 @@ def datausa_api(query_params: str) -> str:
         # Use the existing api_call tool
         return api_call(request_details_str)
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format in query_params for Data USA API: {query_params}: {e}", exc_info=True)
         return f"Error: Invalid JSON format in query_params: {query_params}"
     except Exception as e:
+        logger.error(f"Error preparing Data USA API request: {e}", exc_info=True)
         return f"Error preparing Data USA API request: {e}"
 
 
@@ -575,16 +594,18 @@ def create_subgoal(goal_description: str) -> str:
     Returns a JSON string representing the request for the agent's goal management system.
     Example output: '{"action": "add_goal", "description": "Research topic X"}'
     """
-    print(f"--- Executing Create Subgoal Tool ---")
+    logger.info("Executing Create Subgoal Tool")
     if not isinstance(goal_description, str) or not goal_description.strip():
+        logger.error("Goal description must be a non-empty string.")
         return "Error: Goal description must be a non-empty string."
-    print(f"Sub-goal Description: {goal_description}")
+    logger.info(f"Sub-goal Description: {goal_description}")
 
     # Format the request as JSON for the agent graph to handle
     request_payload = {"action": "add_goal", "description": goal_description.strip()}
     try:
         return json.dumps(request_payload)
     except Exception as e:
+        logger.error(f"Error formatting subgoal request: {e}", exc_info=True)
         return f"Error formatting subgoal request: {e}"
 
 
@@ -597,25 +618,27 @@ def request_human_input(question: str) -> str:
     Input: The question string to ask the user.
     Returns the user's response string.
     """
-    print(f"--- Executing Request Human Input Tool ---")
+    logger.info("Executing Request Human Input Tool")
     if not isinstance(question, str) or not question.strip():
+        logger.error("Question must be a non-empty string.")
         return "Error: Question must be a non-empty string."
-    print(f"Question for Human: {question}")
+    logger.info(f"Question for Human: {question}")
     try:
         # This uses standard input, which might block the agent's main loop
         # A more robust implementation might involve message queues or dedicated UI interaction.
         response = input(f"\n--- AGENT REQUEST ---\n{question}\nYour Input: ")
-        print("--- Human response received ---")
+        logger.info("Human response received.")
         # Basic sanitization (optional)
         response = response.strip()
         return response
     except EOFError:
         # Handle cases where input stream is closed unexpectedly (e.g., running non-interactively)
-        print(
-            "Warning: EOF received while waiting for human input. Returning empty response."
+        logger.warning(
+            "EOF received while waiting for human input. Returning empty response."
         )
         return "Error: No human input received (EOF)."
     except Exception as e:
+        logger.error(f"Error getting human input: {e}", exc_info=True)
         return f"Error getting human input: {e}"
 
 
@@ -626,8 +649,8 @@ def create_file(filepath_and_content: str) -> str:
     Returns a success message or an error message.
     \n   [Security Risk: High - Use with caution and specific instructions]
     """
-    print(f"--- Executing Create File Tool ---")
-    print(f"Filepath and Content: {filepath_and_content}")
+    logger.info("Executing Create File Tool")
+    logger.info(f"Filepath and Content: {filepath_and_content}")
     filepath = None  # Initialize for error reporting
     try:
         params = json.loads(filepath_and_content)
@@ -665,13 +688,15 @@ def create_file(filepath_and_content: str) -> str:
         with open(target_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-        print(f"Successfully created file: {target_path}")
+        logger.info(f"Successfully created file: {target_path}")
         return f"File '{target_path}' created successfully."
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format in input for create_file: {filepath_and_content}: {e}", exc_info=True)
         return f"Error: Invalid JSON format in input: {filepath_and_content}"
     except Exception as e:
         filepath_str = f" '{filepath}'" if filepath else ""
+        logger.error(f"Error creating file{filepath_str}: {e}", exc_info=True)
         return f"Error creating file{filepath_str}: {e}"
 
 
@@ -682,10 +707,11 @@ def create_directory(dirpath: str) -> str:
     Returns a success message or an error message.
     \n   [Security Risk: Medium - Operates within workspace/allowed domains]
     """
-    print(f"--- Executing Create Directory Tool ---")
-    print(f"Requested Directory Path: {dirpath}")
+    logger.info("Executing Create Directory Tool")
+    logger.info(f"Requested Directory Path: {dirpath}")
     try:
         if not isinstance(dirpath, str) or not dirpath.strip():
+            logger.error("Directory path must be a non-empty string.")
             return "Error: Directory path must be a non-empty string."
 
         # Resolve and validate path
@@ -707,9 +733,10 @@ def create_directory(dirpath: str) -> str:
             parents=True, exist_ok=True
         )  # exist_ok=True prevents error if dir exists
 
-        print(f"Successfully created directory (or it already existed): {target_path}")
+        logger.info(f"Successfully created directory (or it already existed): {target_path}")
         return f"Directory '{target_path}' created or already exists."
     except Exception as e:
+        logger.error(f"Error creating directory '{dirpath}': {e}", exc_info=True)
         return f"Error creating directory '{dirpath}': {e}"
 
 
@@ -728,8 +755,8 @@ def git_operation(command_details: str) -> str:
     \n   [Security Risk: High - Use with caution and specific instructions]
     """
     # IMPORTANT: VERY HIGH RISK. Needs strict validation and sandboxing.
-    print(f"--- Executing Git Operation Tool ---")
-    print(f"Command Details: {command_details}")
+    logger.info("Executing Git Operation Tool")
+    logger.info(f"Command Details: {command_details}")
 
     # Define allowed commands and potentially risky options to scrutinize
     ALLOWED_GIT_COMMANDS = {
@@ -837,7 +864,7 @@ def git_operation(command_details: str) -> str:
         # --- Execution ---
         # Using shlex.quote is generally good, but git commands often handle paths, so direct list is okay here
         # given the prior validation. Double-check if allowing complex options.
-        print(f"Executing command: {' '.join(cmd_list)} in {cwd}")
+        logger.info(f"Executing git command: {' '.join(cmd_list)} in {cwd}")
 
         # Execute using subprocess
         process = subprocess.run(
@@ -874,36 +901,40 @@ def git_operation(command_details: str) -> str:
         final_output = result_prefix + output
 
         if process.returncode != 0:
-            print(f"Git command failed with return code {process.returncode}")
+            logger.error(f"Git command failed with return code {process.returncode}. Output:\n{final_output}")
             # Return the potentially truncated output including stderr for debugging
             return f"Error executing Git command (code {process.returncode}):\n{final_output}"
         else:
-            print(f"Git command executed successfully.")
+            logger.info("Git command executed successfully.")
             return final_output
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format in git command_details: {command_details}: {e}", exc_info=True)
         return f"Error: Invalid JSON format in command_details: {command_details}"
     except subprocess.TimeoutExpired:
-        return f"Error: Git command timed out after 120 seconds."
+        logger.error("Git command timed out after 120 seconds.")
+        return "Error: Git command timed out after 120 seconds."
     except FileNotFoundError:
+        logger.error("'git' command not found. Is Git installed and in the system PATH?")
         return (
             "Error: 'git' command not found. Is Git installed and in the system PATH?"
         )
     except Exception as e:
         repo_path_info = f" for repo '{repo_path_str}'" if repo_path_str else ""
+        logger.error(f"Error executing Git operation{repo_path_info}: {e}", exc_info=True)
         return f"Error executing Git operation{repo_path_info}: {e}"
 
 
 # ... list_tools ...
 def list_tools() -> str:
     """Lists the names and descriptions of all available tools."""
-    print(f"--- Executing List Tools Tool ---")
+    logger.info("Executing List Tools Tool")
     available = get_available_tools_list()
     # Use ensure_ascii=False for better readability if descriptions contain non-ASCII
     try:
         return json.dumps(available, indent=2, ensure_ascii=False)
     except Exception as e:
-        print(f"Error encoding tool list to JSON: {e}")
+        logger.error(f"Error encoding tool list to JSON: {e}", exc_info=True)
         # Fallback to simpler representation
         return str(available)
 
@@ -914,10 +945,11 @@ def prioritize_goals(goal_list_and_context: str) -> str:
     Input: JSON string format: '{"goals": ["goal A", "goal B"], "context": "Urgent deadline approaching"}'
     Returns a JSON string with the prioritized list of goals or an error message.
     """
-    print(f"--- Executing Prioritize Goals Tool ---")
-    print(f"Input: {goal_list_and_context}")
+    logger.info("Executing Prioritize Goals Tool")
+    logger.info(f"Input: {goal_list_and_context}")
 
     if not LLM_AVAILABLE:
+        logger.error("LLM is not available, cannot prioritize goals.")
         return "Error: LLM is not available, cannot prioritize goals."
 
     try:
@@ -944,14 +976,16 @@ def prioritize_goals(goal_list_and_context: str) -> str:
         Prioritized Goals (JSON Array):
         """
 
-        print("Attempting goal prioritization using Assistant LLM...")
+        logger.info("Attempting goal prioritization using Assistant LLM...")
         llm = get_assistant_model()
         if not llm:
+            logger.error("Could not load Assistant LLM model for prioritize_goals.")
             return "Error: Could not load Assistant LLM model."
 
         prioritized_goals_str = generate_text(prompt, llm)
 
         if not prioritized_goals_str:
+            logger.error("LLM failed to generate prioritized goal list.")
             return "Error: LLM failed to generate prioritized goal list."
 
         # Attempt to parse the LLM response as JSON
@@ -972,18 +1006,19 @@ def prioritize_goals(goal_list_and_context: str) -> str:
             # Optional: Validate that the returned goals are a permutation of the original ones
             # (This might be too strict if the LLM slightly rephrases them)
 
-            print(f"Prioritized Goals: {prioritized_list}")
+            logger.info(f"Prioritized Goals: {prioritized_list}")
             return json.dumps({"prioritized_goals": prioritized_list})
 
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"Error parsing LLM response for prioritized goals: {e}")
-            print(f"LLM Raw Output: {prioritized_goals_str}")
+            logger.error(f"Error parsing LLM response for prioritized goals: {e}. LLM Raw Output: {prioritized_goals_str}", exc_info=True)
             # Return the raw output if parsing fails, maybe it's still useful
             return f"Warning: Could not parse LLM response as JSON list. Raw output: {prioritized_goals_str}"
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format in input for prioritize_goals: {goal_list_and_context}: {e}", exc_info=True)
         return f"Error: Invalid JSON format in input: {goal_list_and_context}"
     except Exception as e:
+        logger.error(f"Error processing prioritize_goals request: {e}", exc_info=True)
         return f"Error processing prioritize_goals request: {e}"
 
 
@@ -995,39 +1030,49 @@ def manage_goals(action_details: str) -> str:
            or '{"action": "remove", "goal_id": "goal_456"}'
     Returns a JSON string representing the request for the agent's goal management system.
     """
-    print(f"--- Executing Manage Goals Tool ---")
-    print(f"Action Details: {action_details}")
+    logger.info("Executing Manage Goals Tool")
+    logger.info(f"Action Details: {action_details}")
     try:
         params = json.loads(action_details)
         action = params.get("action")
 
         if not action:
+            logger.error("Missing 'action' in details for manage_goals.")
             return "Error: Missing 'action' in details."
 
         # Basic validation based on action
         if action == "add":
             if not params.get("description"):
+                logger.error("'add' action for manage_goals requires 'description'.")
                 return "Error: 'add' action requires 'description'."
             # Ensure description is a string
             if not isinstance(params.get("description"), str):
+                logger.error("'description' for 'add' action must be a string.")
                 return "Error: 'description' for 'add' action must be a string."
         elif action == "update":
             if not params.get("goal_id"):
+                logger.error(f"'{action}' action for manage_goals requires 'goal_id'.")
                 return f"Error: '{action}' action requires 'goal_id'."
             if not params.get("status"):
+                logger.error("'update' action for manage_goals requires 'status'.")
                 return "Error: 'update' action requires 'status'."
             # Ensure goal_id and status are strings
             if not isinstance(params.get("goal_id"), str):
+                logger.error("'goal_id' for 'update' action must be a string.")
                 return "Error: 'goal_id' for 'update' action must be a string."
             if not isinstance(params.get("status"), str):
+                logger.error("'status' for 'update' action must be a string.")
                 return "Error: 'status' for 'update' action must be a string."
         elif action == "remove":
             if not params.get("goal_id"):
+                logger.error(f"'{action}' action for manage_goals requires 'goal_id'.")
                 return f"Error: '{action}' action requires 'goal_id'."
             # Ensure goal_id is a string
             if not isinstance(params.get("goal_id"), str):
+                logger.error("'goal_id' for 'remove' action must be a string.")
                 return "Error: 'goal_id' for 'remove' action must be a string."
         else:
+            logger.error(f"Unknown action '{action}' for manage_goals. Supported actions: add, update, remove.")
             return f"Error: Unknown action '{action}'. Supported actions: add, update, remove."
 
         # Format the request for the agent graph to handle
@@ -1035,12 +1080,14 @@ def manage_goals(action_details: str) -> str:
             "action": "manage_goal",
             "details": params,  # Pass the validated parameters
         }
-        print(f"Formatted goal management request: {request_payload}")
+        logger.info(f"Formatted goal management request: {request_payload}")
         return json.dumps(request_payload)
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format in action_details for manage_goals: {action_details}: {e}", exc_info=True)
         return f"Error: Invalid JSON format in action_details: {action_details}"
     except Exception as e:
+        logger.error(f"Error processing manage_goals request: {e}", exc_info=True)
         return f"Error processing manage_goals request: {e}"
 
 
@@ -1050,10 +1097,11 @@ def request_tool_enhancement(request_description: str) -> str:
     Logs a request for a new tool or enhancement to an existing one.
     Input is a description string of the needed capability. Logs to a file in the workspace.
     """
-    print(f"--- Executing Request Tool Enhancement Tool ---")
+    logger.info("Executing Request Tool Enhancement Tool")
     if not isinstance(request_description, str) or not request_description.strip():
+        logger.error("Request description must be a non-empty string.")
         return "Error: Request description must be a non-empty string."
-    print(f"Enhancement Request: {request_description}")
+    logger.info(f"Enhancement Request: {request_description}")
     log_file = WORKSPACE_DIR / "tool_enhancement_requests.log"
     try:
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -1062,8 +1110,10 @@ def request_tool_enhancement(request_description: str) -> str:
         WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(log_entry)
+        logger.info(f"Enhancement request logged to {log_file}.")
         return f"Enhancement request logged to {log_file}."
     except Exception as e:
+        logger.error(f"Error logging enhancement request: {e}", exc_info=True)
         return f"Error logging enhancement request: {e}"
 
 
@@ -1082,20 +1132,24 @@ def monitor_environment(trigger_conditions: str) -> str:
     (like file watching, scheduling, persistent API polling) which are beyond the scope
     of a simple synchronous tool execution model. It currently returns a 'Not Implemented' message.
     """
-    print(f"--- Executing Monitor Environment Tool (Placeholder) ---")
-    print(f"Trigger Conditions Received: {trigger_conditions}")
+    logger.info("Executing Monitor Environment Tool (Placeholder)")
+    logger.info(f"Trigger Conditions Received: {trigger_conditions}")
     try:
         # Basic validation of input format
         conditions = json.loads(trigger_conditions)
         if not isinstance(conditions, dict) or "type" not in conditions:
+            logger.error("Invalid format for trigger_conditions. Expected JSON object with 'type'.")
             return "Error: Invalid format for trigger_conditions. Expected JSON object with 'type'."
 
         # Return placeholder message indicating it's not implemented
+        logger.warning("Monitor Environment tool is a placeholder and not fully implemented.")
         return "Tool Not Implemented: Environment monitoring requires complex background processes (scheduling, file watching, etc.) which are not supported by this synchronous tool."
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format in trigger_conditions for monitor_environment: {trigger_conditions}: {e}", exc_info=True)
         return f"Error: Invalid JSON format in trigger_conditions: {trigger_conditions}"
     except Exception as e:
+        logger.error(f"Error processing monitor_environment request: {e}", exc_info=True)
         return f"Error processing monitor_environment request: {e}"
 
 
@@ -1105,13 +1159,15 @@ def generate_hypothesis(context: str) -> str:
     Input: A summary string of the current context (e.g., recent observations, available tools, idle status).
     Returns a string containing suggested hypotheses or opportunities, or an error message.
     """
-    print(f"--- Executing Generate Hypothesis Tool ---")
+    logger.info("Executing Generate Hypothesis Tool")
     if not LLM_AVAILABLE:
+        logger.error("LLM is not available, cannot generate hypothesis.")
         return "Error: LLM is not available, cannot generate hypothesis."
     if not isinstance(context, str) or not context.strip():
+        logger.error("Context for hypothesis generation must be a non-empty string.")
         return "Error: Context must be a non-empty string."
 
-    print(f"Context for Hypothesis: {context[:200]}...")  # Log truncated context
+    logger.info(f"Context for Hypothesis: {context[:200]}...")  # Log truncated context
 
     # Get available tool names for the prompt context
     tool_names = list(AVAILABLE_TOOLS.keys())
@@ -1138,17 +1194,19 @@ def generate_hypothesis(context: str) -> str:
     ...
     """
 
-    print("Generating hypotheses using Main LLM...")
+    logger.info("Generating hypotheses using Main LLM...")
     llm = get_main_model()
     if not llm:
+        logger.error("Could not load Main LLM model for generate_hypothesis.")
         return "Error: Could not load Main LLM model."
 
     hypothesis_text = generate_text(prompt, llm)
 
     if not hypothesis_text:
+        logger.error("LLM failed to generate hypotheses.")
         return "Error: LLM failed to generate hypotheses."
 
-    print(f"Generated Hypotheses: {hypothesis_text}")
+    logger.info(f"Generated Hypotheses: {hypothesis_text}")
     return hypothesis_text.strip()
 
 
@@ -1158,16 +1216,18 @@ def evaluate_self_performance(recent_activity_summary: str) -> str:
     Input: A summary string of recent goals, actions, and outcomes.
     Returns a string containing the LLM's evaluation and key learnings, or an error message.
     """
-    print(f"--- Executing Evaluate Self Performance Tool ---")
+    logger.info("Executing Evaluate Self Performance Tool")
     if not LLM_AVAILABLE:
+        logger.error("LLM is not available, cannot evaluate performance.")
         return "Error: LLM is not available, cannot evaluate performance."
     if (
         not isinstance(recent_activity_summary, str)
         or not recent_activity_summary.strip()
     ):
+        logger.error("Recent activity summary must be a non-empty string.")
         return "Error: Recent activity summary must be a non-empty string."
 
-    print(
+    logger.info(
         f"Summary for Self-Evaluation: {recent_activity_summary[:200]}..."
     )  # Log truncated summary
 
@@ -1189,17 +1249,19 @@ def evaluate_self_performance(recent_activity_summary: str) -> str:
     ...
     """
 
-    print("Generating self-performance evaluation using Main LLM...")
+    logger.info("Generating self-performance evaluation using Main LLM...")
     llm = get_main_model()
     if not llm:
+        logger.error("Could not load Main LLM model for evaluate_self_performance.")
         return "Error: Could not load Main LLM model."
 
     evaluation_text = generate_text(prompt, llm)
 
     if not evaluation_text:
+        logger.error("LLM failed to generate self-performance evaluation.")
         return "Error: LLM failed to generate self-performance evaluation."
 
-    print(f"Generated Evaluation: {evaluation_text}")
+    logger.info(f"Generated Evaluation: {evaluation_text}")
     # The result could potentially be stored in semantic_memory by the agent graph later.
     return evaluation_text.strip()
 
@@ -1367,7 +1429,7 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
         - 'result': The result from the tool execution (string, potentially JSON formatted).
         - 'error': An error message string if execution failed, otherwise None.
     """
-    print(f"Attempting to parse and execute action: {action_str}")
+    logger.info(f"Attempting to parse and execute action: {action_str}")
     tool_name = ""
     argument = ""  # The raw string argument
     error = None
@@ -1388,7 +1450,7 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                 and any(t in argument for t in AVAILABLE_TOOLS)
             ):
                 error = f"Error: Detected nested tool call structure within argument '{argument}'. Arguments must be plain strings or valid JSON strings, not nested calls."
-                print(error)
+                logger.error(error)
 
         else:
             # Handle tools that might not need arguments (or called without brackets)
@@ -1402,13 +1464,13 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                     error = f"Invalid action format. Tool '{potential_tool}' found, but missing brackets '[]' around argument. Use '{potential_tool}[argument]' or '{potential_tool}[]' if no argument is needed."
                 else:
                     error = f"Invalid action format or unknown tool. Expected 'TOOL_NAME[argument]' or 'TOOL_NAME', got '{action_str}'."
-                print(error)
+                logger.error(error)
 
         # If no parsing error so far, proceed to execution
         if not error and tool_name:
             if tool_name in AVAILABLE_TOOLS:
                 tool_function = AVAILABLE_TOOLS[tool_name]
-                print(
+                logger.info(
                     f"Executing tool '{tool_name}' with raw argument string: '{argument[:100]}{'...' if len(argument)>100 else ''}'"
                 )
 
@@ -1433,7 +1495,7 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                     ) and "Error:" in tool_function("")
                     if not is_placeholder_lambda:
                         error = f"Tool '{tool_name}' requires an argument, but none was provided inside the brackets []."
-                        print(error)
+                        logger.error(error)
                     else:
                         # If it's a placeholder lambda, call it without args to get the error message
                         result = tool_function()
@@ -1441,8 +1503,8 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                 elif not takes_arg and argument != "":
                     # Allow tools that take no args to be called with empty brackets TOOL[]
                     if argument:  # Only warn if non-empty argument provided
-                        print(
-                            f"Warning: Tool '{tool_name}' does not take arguments, but '{argument}' was provided. Ignoring argument."
+                        logger.warning(
+                            f"Tool '{tool_name}' does not take arguments, but '{argument}' was provided. Ignoring argument."
                         )
                     result = tool_function()  # Call without argument
                 elif takes_arg:
@@ -1482,7 +1544,7 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                     result = tool_function()
 
                 if error is None:
-                    print(f"Tool '{tool_name}' execution finished.")
+                    logger.info(f"Tool '{tool_name}' execution finished.")
                     # Ensure result is a string or None before returning
                     if result is not None and not isinstance(result, str):
                         try:
@@ -1495,8 +1557,8 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
                                 # Convert other types (int, bool, etc.) to string
                                 result = str(result)
                         except Exception as json_e:
-                            print(
-                                f"Warning: Could not serialize tool result to JSON: {json_e}"
+                            logger.warning(
+                                f"Could not serialize tool result to JSON: {json_e}", exc_info=True
                             )
                             result = f"Error: Could not serialize tool result of type {type(result)}."
                     # Check if the result itself indicates an error (common pattern)
@@ -1505,15 +1567,15 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
 
             else:  # Tool name parsed but not found in registry
                 error = f"Tool '{tool_name}' not found in available tools."
-                print(error)
+                logger.error(error)
 
     except Exception as e:
         # Catch-all for unexpected errors during parsing or execution logic
         error_msg = f"Unexpected error during tool parsing/execution for action '{action_str}': {e}"
         import traceback
 
-        print(
-            f"{error_msg}\n{traceback.format_exc()}"
+        logger.error(
+            f"{error_msg}\n{traceback.format_exc()}", exc_info=True
         )  # Print stack trace for debugging
         error = error_msg
         result = None  # Ensure result is None on error
@@ -1531,13 +1593,15 @@ def execute_tool(action_str: str) -> Dict[str, Any]:
 
 # --- Example Usage (Updated) ---
 if __name__ == "__main__":
-    print("--- Initializing Workspace and Tools ---")
-    print(f"Workspace directory: {WORKSPACE_DIR}")
-    print("\nAvailable Tools:")
+    # Basic logging setup for the __main__ block
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger.info("--- Initializing Workspace and Tools ---") # Use logger from the module
+    logger.info(f"Workspace directory: {WORKSPACE_DIR}")
+    logger.info("\nAvailable Tools:")
     # Use ensure_ascii=False for potentially better display of non-ASCII chars in descriptions
-    print(json.dumps(get_available_tools_list(), indent=2, ensure_ascii=False))
+    logger.info(json.dumps(get_available_tools_list(), indent=2, ensure_ascii=False))
 
-    print("\n--- Testing Tool Execution ---")
+    logger.info("\n--- Testing Tool Execution ---")
 
     # Ensure workspace exists for tests
     WORKSPACE_DIR.mkdir(exist_ok=True)
@@ -1549,10 +1613,10 @@ if __name__ == "__main__":
     import shutil
 
     if test_dir_path.exists():
-        print(f"Cleaning up previous test directory: {test_dir_path}")
+        logger.info(f"Cleaning up previous test directory: {test_dir_path}")
         shutil.rmtree(test_dir_path)
     if test_repo_path.exists():
-        print(f"Cleaning up previous test repository: {test_repo_path}")
+        logger.info(f"Cleaning up previous test repository: {test_repo_path}")
         shutil.rmtree(test_repo_path)
 
     # --- Test Cases ---
@@ -1815,12 +1879,12 @@ if __name__ == "__main__":
         action = test["action"]
         skip = test["skip_if_no_libs"]
 
-        print(f"\n--- Running Test: {name} ---")
-        print(f"Action: {action}")
+        logger.info(f"\n--- Running Test: {name} ---")
+        logger.info(f"Action: {action}")
 
         if skip:
-            print(
-                "Skipping test due to missing library dependencies or LLM unavailability."
+            logger.warning(
+                f"Skipping test '{name}' due to missing library dependencies or LLM unavailability."
             )
             results_summary[name] = "SKIPPED (Dependency)"
             continue
@@ -1834,8 +1898,8 @@ if __name__ == "__main__":
             "Git Operation (Dangerous Option)",
         ]
         if git_depends_on_clone and results_summary.get("Git Clone") != "PASSED":
-            print(
-                "Skipping test because prerequisite 'Git Clone' did not pass or was skipped."
+            logger.warning(
+                f"Skipping test '{name}' because prerequisite 'Git Clone' did not pass or was skipped."
             )
             results_summary[name] = "SKIPPED (Prereq Failed)"
             continue
@@ -1852,14 +1916,14 @@ if __name__ == "__main__":
             "Read File (After Delete)",
         ]
         if file_depends_on_create and results_summary.get("Create File") != "PASSED":
-            print(
-                "Skipping test because prerequisite 'Create File' did not pass or was skipped."
+            logger.warning(
+                f"Skipping test '{name}' because prerequisite 'Create File' did not pass or was skipped."
             )
             results_summary[name] = "SKIPPED (Prereq Failed)"
             continue
 
         output = execute_tool(action)
-        print(f"Output:\n{json.dumps(output, indent=2)}")  # Pretty print output dict
+        logger.info(f"Output for '{name}':\n{json.dumps(output, indent=2)}")  # Pretty print output dict
 
         # Basic pass/fail check
         passed = output.get("error") is None
@@ -1901,22 +1965,23 @@ if __name__ == "__main__":
                 )
 
         results_summary[name] = "PASSED" if passed else "FAILED"
-        print(f"Result: {results_summary[name]}")
+        logger.info(f"Result for '{name}': {results_summary[name]}")
 
-    print("\n\n--- Test Summary ---")
+    logger.info("\n\n--- Test Summary ---")
     # Sort summary alphabetically for consistency
     for name in sorted(results_summary.keys()):
         result = results_summary[name]
-        print(f"{name:<50}: {result}")
+        logger.info(f"{name:<50}: {result}")
 
     # Final cleanup
-    print("\n--- Cleaning up test artifacts ---")
+    logger.info("\n--- Cleaning up test artifacts ---")
     if test_dir_path.exists():
         shutil.rmtree(test_dir_path)
-        print(f"Removed: {test_dir_path}")
+        logger.info(f"Removed: {test_dir_path}")
     if test_repo_path.exists():
         shutil.rmtree(test_repo_path)
-        print(f"Removed: {test_repo_path}")
+        logger.info(f"Removed: {test_repo_path}")
     enhancement_log = WORKSPACE_DIR / "tool_enhancement_requests.log"
     if enhancement_log.exists():
         enhancement_log.unlink()
+        logger.info(f"Removed: {enhancement_log}")

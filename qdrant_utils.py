@@ -4,12 +4,16 @@ from qdrant_client import QdrantClient, models
 from qdrant_client.http.models import Distance, VectorParams
 from dotenv import load_dotenv
 from typing import List, Dict, Any, Optional
+import logging
 
 # Import the real embedding function
 from llm_utils import generate_embeddings
 
 # Load environment variables
 load_dotenv()
+
+# Create a logger instance
+logger = logging.getLogger(__name__)
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
@@ -34,23 +38,23 @@ def get_qdrant_client() -> QdrantClient:
     else:
         # Assumes local instance without auth
         client = QdrantClient(url=QDRANT_URL)
-    print("Qdrant client initialized.")
+    logger.info("Qdrant client initialized.")
     return client
 
 
 def initialize_qdrant_collections(client: QdrantClient):
     """Creates Qdrant collections if they don't exist."""
     existing_collections = [col.name for col in client.get_collections().collections]
-    print(f"Existing collections: {existing_collections}")
+    logger.info(f"Existing collections: {existing_collections}")
     for name, vector_params in COLLECTIONS.items():
         if name not in existing_collections:
-            print(f"Creating collection: {name}")
+            logger.info(f"Creating collection: {name}")
             client.create_collection(
                 collection_name=name,
                 vectors_config=vector_params,
             )
         else:
-            print(f"Collection '{name}' already exists.")
+            logger.info(f"Collection '{name}' already exists.")
 
 
 # --- Memory Operations ---
@@ -64,11 +68,11 @@ def add_memory(
 ):
     """Adds documents with their embeddings to a Qdrant collection."""
     if collection_name not in COLLECTIONS:
-        print(f"Error: Collection '{collection_name}' is not defined.")
+        logger.error(f"Collection '{collection_name}' is not defined.")
         return
 
     if not documents or not texts or len(documents) != len(texts):
-        print("Error: Mismatch between documents and texts or empty lists.")
+        logger.error("Mismatch between documents and texts or empty lists.")
         return
 
     # Generate embeddings using the imported function
@@ -76,8 +80,8 @@ def add_memory(
     embeddings = generate_embeddings(texts, task_type="RETRIEVAL_DOCUMENT")
 
     if embeddings is None or len(embeddings) != len(documents):
-        print(
-            f"Error: Failed to generate embeddings or mismatch in count for collection '{collection_name}'."
+        logger.error(
+            f"Failed to generate embeddings or mismatch in count for collection '{collection_name}'."
         )
         return
 
@@ -93,15 +97,15 @@ def add_memory(
             )
         )
 
-    print(f"Adding {len(points)} points to collection '{collection_name}'...")
+    logger.info(f"Adding {len(points)} points to collection '{collection_name}'...")
     try:
         # Use upsert for idempotency (add or update)
         response = client.upsert(
             collection_name=collection_name, points=points, wait=True
         )
-        print(f"Upsert response: {response}")
+        logger.info(f"Upsert response: {response}")
     except Exception as e:
-        print(f"Error adding points to Qdrant collection '{collection_name}': {e}")
+        logger.exception(f"Error adding points to Qdrant collection '{collection_name}': {e}")
 
 
 def search_memory(
@@ -109,7 +113,7 @@ def search_memory(
 ) -> List[Dict[str, Any]]:
     """Searches a Qdrant collection based on query text."""
     if collection_name not in COLLECTIONS:
-        print(f"Error: Collection '{collection_name}' is not defined.")
+        logger.error(f"Collection '{collection_name}' is not defined.")
         return []
 
     # Generate embedding for the query text
@@ -119,12 +123,12 @@ def search_memory(
     )
 
     if query_embedding_list is None or not query_embedding_list:
-        print(f"Error: Failed to generate embedding for query: '{query_text}'")
+        logger.error(f"Failed to generate embedding for query: '{query_text}'")
         return []
 
     query_vector = query_embedding_list[0]
 
-    print(f"Searching collection '{collection_name}' for: '{query_text}'")
+    logger.info(f"Searching collection '{collection_name}' for: '{query_text}'")
     try:
         search_result = client.search(
             collection_name=collection_name,
@@ -132,7 +136,7 @@ def search_memory(
             limit=limit,
             with_payload=True,  # Include the stored payload in results
         )
-        print(f"Found {len(search_result)} results in '{collection_name}'.")
+        logger.info(f"Found {len(search_result)} results in '{collection_name}'.")
         # Convert ScoredPoint objects to dictionaries
         results = [
             {"id": hit.id, "score": hit.score, "payload": hit.payload}
@@ -140,17 +144,20 @@ def search_memory(
         ]
         return results
     except Exception as e:
-        print(f"Error searching Qdrant collection '{collection_name}': {e}")
+        logger.exception(f"Error searching Qdrant collection '{collection_name}': {e}")
         return []
 
 
 # --- Example Usage (Optional) ---
 if __name__ == "__main__":
+    # Basic logging configuration for example usage
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
     qdrant_client = get_qdrant_client()
     initialize_qdrant_collections(qdrant_client)
 
     # Example: Add a dummy memory using real embeddings
-    print("\n--- Testing Add Memory ---")
+    logger.info("\n--- Testing Add Memory ---")
     dummy_doc = {
         "id": "ep1",
         "content": "User asked about the weather.",
@@ -169,17 +176,17 @@ if __name__ == "__main__":
     add_memory(qdrant_client, "semantic_memory", [dummy_doc_2], [dummy_text_2])
 
     # Example: Search memory using real embeddings
-    print("\n--- Testing Search Memory ---")
+    logger.info("\n--- Testing Search Memory ---")
     search_results_ep = search_memory(
         qdrant_client, "episodic_memory", "questions about weather"
     )
-    print("\nEpisodic Search Results ('questions about weather'):")
+    logger.info("\nEpisodic Search Results ('questions about weather'):")
     for result in search_results_ep:
-        print(result)
+        logger.info(result)
 
     search_results_sem = search_memory(
         qdrant_client, "semantic_memory", "how to handle weather queries"
     )
-    print("\nSemantic Search Results ('how to handle weather queries'):")
+    logger.info("\nSemantic Search Results ('how to handle weather queries'):")
     for result in search_results_sem:
-        print(result)
+        logger.info(result)
